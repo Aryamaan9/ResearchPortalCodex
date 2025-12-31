@@ -748,7 +748,7 @@ type ExcelExtractionResult = {
 async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtractionResult> {
   const extractorPath = path.resolve(process.cwd(), "script", "extract_excel.py");
 
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
@@ -758,22 +758,32 @@ async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtraction
     extractor.stderr.on("data", (data: Buffer) => stderrChunks.push(data));
 
     extractor.on("error", (err) => {
-      reject(new Error(`Failed to start Excel extractor: ${err.message}`));
+      resolve({
+        sheets: [],
+        error: `Failed to start Excel extractor: ${err.message}. Please ensure python3 is installed.`
+      });
     });
 
     extractor.on("close", (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString();
+      const stderr = Buffer.concat(stderrChunks).toString();
+
       if (code !== 0) {
-        const stderr = Buffer.concat(stderrChunks).toString().trim();
-        reject(new Error(`Excel extractor exited with code ${code}: ${stderr || "unknown error"}`));
+        resolve({
+          sheets: [],
+          error: `Excel extractor failed with code ${code}: ${stderr}`
+        });
         return;
       }
 
       try {
-        const stdout = Buffer.concat(stdoutChunks).toString();
         const parsed = JSON.parse(stdout) as ExcelExtractionResult;
         resolve(parsed);
       } catch (parseError) {
-        reject(new Error(`Failed to parse Excel extractor output: ${parseError}`));
+        resolve({
+          sheets: [],
+          error: `Failed to parse Excel extractor output: ${parseError}. Raw output: ${stdout}`
+        });
       }
     });
   });
