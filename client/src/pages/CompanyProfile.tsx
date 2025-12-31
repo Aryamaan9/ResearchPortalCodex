@@ -17,7 +17,7 @@ type LinkedDocument = {
 };
 
 type CompanyResponse = {
-  company: Company;
+  company: Company & { revenue: number | null };
   industry: Industry | null;
   documents: LinkedDocument[];
 };
