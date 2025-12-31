@@ -130,12 +130,19 @@ export async function registerRoutes(
   // Get all documents
   app.get("/api/documents", async (req: Request, res: Response) => {
     try {
-      const { type, status, search } = req.query;
-      const documents = await storage.getDocuments({
-        type: type as string,
-        status: status as string,
-        search: search as string,
-      });
+      const { type, status, search, companyId } = req.query;
+      
+      let documents;
+      if (companyId) {
+        documents = await storage.getCompanyDocuments(parseInt(companyId as string));
+      } else {
+        documents = await storage.getDocuments({
+          type: type as string,
+          status: status as string,
+          search: search as string,
+        });
+      }
+      
       res.json({ documents, total: documents.length });
     } catch (error) {
       console.error("Error getting documents:", error);

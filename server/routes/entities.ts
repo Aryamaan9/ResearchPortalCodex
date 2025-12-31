@@ -103,8 +103,7 @@ export function registerEntityRoutes(app: Express) {
         );
       }
 
-      const baseQuery = db
-      let query = db
+      const query = db
         .select({
           id: companies.id,
           name: companies.name,
@@ -117,16 +116,13 @@ export function registerEntityRoutes(app: Express) {
         .from(companies)
         .leftJoin(industries, eq(companies.industryId, industries.id));
 
-      const filteredQuery =
-        conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
-
-      const results = await filteredQuery.orderBy(companies.name);
       if (conditions.length > 0) {
-        query = query.where(and(...conditions));
+        const results = await query.where(and(...conditions)).orderBy(companies.name);
+        res.json(results);
+      } else {
+        const results = await query.orderBy(companies.name);
+        res.json(results);
       }
-
-      const results = await query.orderBy(companies.name);
-      res.json(results);
     } catch (error) {
       console.error("Error fetching companies:", error);
       res.status(500).json({ error: "Failed to fetch companies" });
