@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, boolean, serial, real, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, boolean, serial, real, index, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -133,6 +133,38 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// Industries table
+export const industries = pgTable("industries", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  uniqueIndex("industries_name_unique").on(table.name),
+]);
+
+// Companies table
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  ticker: text("ticker"),
+  industryId: integer("industry_id").notNull().references(() => industries.id, { onDelete: "cascade" }),
+  description: text("description"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  index("companies_industry_id_idx").on(table.industryId),
+]);
+
+// Company documents junction table
+export const companyDocuments = pgTable("company_documents", {
+  companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  documentId: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.companyId, table.documentId] }),
+  index("company_documents_company_id_idx").on(table.companyId),
+  index("company_documents_document_id_idx").on(table.documentId),
+]);
+
 // Relations
 export const documentsRelations = relations(documents, ({ many }) => ({
   pages: many(documentPages),
@@ -180,6 +212,29 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+export const industriesRelations = relations(industries, ({ many }) => ({
+  companies: many(companies),
+}));
+
+export const companiesRelations = relations(companies, ({ one, many }) => ({
+  industry: one(industries, {
+    fields: [companies.industryId],
+    references: [industries.id],
+  }),
+  companyDocuments: many(companyDocuments),
+}));
+
+export const companyDocumentsRelations = relations(companyDocuments, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyDocuments.companyId],
+    references: [companies.id],
+  }),
+  document: one(documents, {
+    fields: [companyDocuments.documentId],
+    references: [documents.id],
+  }),
+}));
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -224,6 +279,20 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   createdAt: true,
 });
 
+export const insertIndustrySchema = createInsertSchema(industries).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompanyDocumentSchema = createInsertSchema(companyDocuments).omit({
+  createdAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -250,3 +319,9 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type Industry = typeof industries.$inferSelect;
+export type InsertIndustry = z.infer<typeof insertIndustrySchema>;
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type CompanyDocument = typeof companyDocuments.$inferSelect;
+export type InsertCompanyDocument = z.infer<typeof insertCompanyDocumentSchema>;
