@@ -36,11 +36,13 @@ export interface IStorage {
   getDocumentPage(documentId: number, pageNumber: number): Promise<DocumentPage | undefined>;
   createDocumentPage(page: InsertDocumentPage): Promise<DocumentPage>;
   updateDocumentPage(id: number, updates: Partial<DocumentPage>): Promise<DocumentPage | undefined>;
+  deleteDocumentPages(documentId: number): Promise<void>;
 
   // Embeddings
   getEmbeddings(documentId: number): Promise<Embedding[]>;
   createEmbedding(embedding: InsertEmbedding): Promise<Embedding>;
   searchEmbeddings(query: string, limit?: number): Promise<Embedding[]>;
+  deleteDocumentEmbeddings(documentId: number): Promise<void>;
 
   // Entities
   getEntities(): Promise<Entity[]>;
@@ -150,6 +152,10 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
+  async deleteDocumentPages(documentId: number): Promise<void> {
+    await db.delete(documentPages).where(eq(documentPages.documentId, documentId));
+  }
+
   // Embeddings
   async getEmbeddings(documentId: number): Promise<Embedding[]> {
     return db.select().from(embeddings).where(eq(embeddings.documentId, documentId)).orderBy(embeddings.chunkIndex);
@@ -165,6 +171,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(embeddings)
       .where(sql`to_tsvector('english', ${embeddings.chunkText}) @@ plainto_tsquery('english', ${query})`)
       .limit(limit);
+  }
+
+  async deleteDocumentEmbeddings(documentId: number): Promise<void> {
+    await db.delete(embeddings).where(eq(embeddings.documentId, documentId));
   }
 
   // Entities
