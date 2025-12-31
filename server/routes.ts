@@ -250,6 +250,55 @@ export async function registerRoutes(
     }
   });
 
+  // Industries
+  app.get("/api/industries", async (req: Request, res: Response) => {
+    try {
+      const industries = await storage.getIndustries();
+      res.json(industries);
+    } catch (error) {
+      console.error("Error getting industries:", error);
+      res.status(500).json({ error: "Failed to get industries" });
+    }
+  });
+
+  app.get("/api/industries/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const industry = await storage.getIndustry(id);
+      if (!industry) return res.status(404).json({ error: "Industry not found" });
+      const companies = await storage.getCompanies(id);
+      res.json({ ...industry, companies });
+    } catch (error) {
+      console.error("Error getting industry:", error);
+      res.status(500).json({ error: "Failed to get industry" });
+    }
+  });
+
+  // Companies
+  app.get("/api/companies", async (req: Request, res: Response) => {
+    try {
+      const { industryId } = req.query;
+      const companies = await storage.getCompanies(industryId ? parseInt(industryId as string) : undefined);
+      res.json(companies);
+    } catch (error) {
+      console.error("Error getting companies:", error);
+      res.status(500).json({ error: "Failed to get companies" });
+    }
+  });
+
+  app.get("/api/companies/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const company = await storage.getCompany(id);
+      if (!company) return res.status(404).json({ error: "Company not found" });
+      const documents = await storage.getCompanyDocuments(id);
+      res.json({ ...company, documents });
+    } catch (error) {
+      console.error("Error getting company:", error);
+      res.status(500).json({ error: "Failed to get company" });
+    }
+  });
+
   // Re-process document (re-extract text and re-classify)
   app.post("/api/documents/:id/reprocess", async (req: Request, res: Response) => {
     try {

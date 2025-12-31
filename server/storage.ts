@@ -6,7 +6,11 @@ import {
   type Entity, type InsertEntity,
   type DocumentEntity, type InsertDocumentEntity,
   type QaHistory, type InsertQaHistory,
-  users, documents, documentPages, embeddings, entities, documentEntities, qaHistory
+  type Industry, type InsertIndustry,
+  type Company, type InsertCompany,
+  type CompanyDocument, type InsertCompanyDocument,
+  users, documents, documentPages, embeddings, entities, documentEntities, qaHistory,
+  industries, companies, companyDocuments
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, ilike, or, and } from "drizzle-orm";
@@ -53,6 +57,18 @@ export interface IStorage {
   // Q&A History
   getQaHistory(limit?: number): Promise<QaHistory[]>;
   createQaHistory(qa: InsertQaHistory): Promise<QaHistory>;
+
+  // Industries
+  getIndustries(): Promise<Industry[]>;
+  getIndustry(id: number): Promise<Industry | undefined>;
+  createIndustry(industry: InsertIndustry): Promise<Industry>;
+
+  // Companies
+  getCompanies(industryId?: number): Promise<Company[]>;
+  getCompany(id: number): Promise<Company | undefined>;
+  createCompany(company: InsertCompany): Promise<Company>;
+  getCompanyDocuments(companyId: number): Promise<Document[]>;
+  linkCompanyDocument(link: InsertCompanyDocument): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -228,6 +244,54 @@ export class DatabaseStorage implements IStorage {
   async createQaHistory(qa: InsertQaHistory): Promise<QaHistory> {
     const [created] = await db.insert(qaHistory).values(qa).returning();
     return created;
+  }
+
+  // Industries
+  async getIndustries(): Promise<Industry[]> {
+    return db.select().from(industries).orderBy(industries.name);
+  }
+
+  async getIndustry(id: number): Promise<Industry | undefined> {
+    const [industry] = await db.select().from(industries).where(eq(industries.id, id));
+    return industry || undefined;
+  }
+
+  async createIndustry(industry: InsertIndustry): Promise<Industry> {
+    const [created] = await db.insert(industries).values(industry).returning();
+    return created;
+  }
+
+  // Companies
+  async getCompanies(industryId?: number): Promise<Company[]> {
+    if (industryId) {
+      return db.select().from(companies).where(eq(companies.industryId, industryId)).orderBy(companies.name);
+    }
+    return db.select().from(companies).orderBy(companies.name);
+  }
+
+  async getCompany(id: number): Promise<Company | undefined> {
+    const [company] = await db.select().from(companies).where(eq(companies.id, id));
+    return company || undefined;
+  }
+
+  async createCompany(company: InsertCompany): Promise<Company> {
+    const [created] = await db.insert(companies).values(company).returning();
+    return created;
+  }
+
+  async getCompanyDocuments(companyId: number): Promise<Document[]> {
+    const results = await db.select({
+      document: documents
+    })
+    .from(companyDocuments)
+    .innerJoin(documents, eq(companyDocuments.documentId, documents.id))
+    .where(eq(companyDocuments.companyId, companyId));
+    
+    return results.map(r => r.document);
+  }
+
+  async linkCompanyDocument(link: InsertCompanyDocument): Promise<void> {
+    await db.insert(companyDocuments).values(link).onConflictDoNothing();
   }
 }
 
