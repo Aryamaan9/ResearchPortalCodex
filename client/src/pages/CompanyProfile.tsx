@@ -317,9 +317,9 @@ export default function CompanyProfilePage() {
     );
   }
 
-  const researchBySection = (section: string) => data.research.filter((r) => r.section === section);
+  const researchBySection = (section: string) => (data?.research || []).filter((r) => r.section === section);
 
-  const pinnedResearch = data.research.filter((r) => r.pinned);
+  const pinnedResearch = (data?.research || []).filter((r) => r.pinned);
   const activityItems = activity || [];
 
   const sections: { key: string; label: string }[] = [
