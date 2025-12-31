@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, boolean, serial, real, index, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, boolean, serial, real, index, primaryKey, uniqueIndex, date, } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -56,10 +56,13 @@ export const documents = pgTable("documents", {
   keyTopics: jsonb("key_topics").$type<string[]>(),
   sentiment: text("sentiment"),
   classificationData: jsonb("classification_data").$type<Record<string, unknown>>(),
+  docType: text("doc_type"),
+  tags: text("tags").array(),
 }, (table) => [
   index("documents_processing_status_idx").on(table.processingStatus),
   index("documents_document_type_idx").on(table.documentType),
   index("documents_upload_date_idx").on(table.uploadDate),
+  index("documents_doc_type_idx").on(table.docType),
 ]);
 
 // Document pages table - per-page text and summaries
@@ -137,7 +140,13 @@ export const messages = pgTable("messages", {
 export const industries = pgTable("industries", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  demandDrivers: text("demand_drivers"),
+  supplyDrivers: text("supply_drivers"),
+  costDrivers: text("cost_drivers"),
+  riskFactors: text("risk_factors"),
+  regulations: text("regulations"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
   uniqueIndex("industries_name_unique").on(table.name),
 ]);
@@ -151,6 +160,8 @@ export const companies = pgTable("companies", {
   description: text("description"),
   revenue: real("revenue"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  pipelineStage: text("pipeline_stage"),
+  pipelineUpdatedAt: timestamp("pipeline_updated_at"),
 }, (table) => [
   index("companies_industry_id_idx").on(table.industryId),
 ]);
@@ -165,6 +176,101 @@ export const companyDocuments = pgTable("company_documents", {
   index("company_documents_company_id_idx").on(table.companyId),
   index("company_documents_document_id_idx").on(table.documentId),
 ]);
+
+export const industryDocuments = pgTable("industry_documents", {
+  industryId: integer("industry_id").notNull().references(() => industries.id, { onDelete: "cascade" }),
+  documentId: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.industryId, table.documentId] }),
+  index("industry_documents_industry_id_idx").on(table.industryId),
+  index("industry_documents_document_id_idx").on(table.documentId),
+]);
+
+export const categories = pgTable("categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  uniqueIndex("categories_name_unique").on(table.name),
+]);
+
+export const companyCategories = pgTable("company_categories", {
+  companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  categoryId: integer("category_id").notNull().references(() => categories.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.companyId, table.categoryId] }),
+  index("company_categories_company_id_idx").on(table.companyId),
+  index("company_categories_category_id_idx").on(table.categoryId),
+]);
+
+export const companyMetrics = pgTable("company_metrics", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  valueText: text("value_text"),
+  valueNumber: real("value_number"),
+  valueUnit: text("value_unit"),
+  period: text("period"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  index("company_metrics_company_id_idx").on(table.companyId),
+  index("company_metrics_company_key_idx").on(table.companyId, table.key),
+  uniqueIndex("company_metrics_company_key_period_unique").on(table.companyId, table.key, table.period),
+]);
+
+export const researchItems = pgTable("research_items", {
+  id: serial("id").primaryKey(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  section: text("section").notNull(),
+  title: text("title").notNull(),
+  content: text("content"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  pinned: boolean("pinned").default(false).notNull(),
+});
+
+export const researchSources = pgTable("research_sources", {
+  id: serial("id").primaryKey(),
+  researchItemId: integer("research_item_id").notNull().references(() => researchItems.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(),
+  documentId: integer("document_id").references(() => documents.id, { onDelete: "set null" }),
+  pageNumber: integer("page_number"),
+  excerpt: text("excerpt"),
+  url: text("url"),
+  snippetId: integer("snippet_id"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+  index("research_sources_item_id_idx").on(table.researchItemId),
+  index("research_sources_document_id_idx").on(table.documentId),
+]);
+
+export const sourceSnippets = pgTable("source_snippets", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").references(() => documents.id, { onDelete: "cascade" }),
+  pageNumber: integer("page_number"),
+  title: text("title"),
+  excerpt: text("excerpt").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const tasks = pgTable("tasks", {
+  id: serial("id").primaryKey(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull(),
+  priority: text("priority"),
+  dueDate: date("due_date"),
+  assignedTo: text("assigned_to"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
 
 // Relations
 export const documentsRelations = relations(documents, ({ many }) => ({
@@ -215,6 +321,10 @@ export const messagesRelations = relations(messages, ({ one }) => ({
 
 export const industriesRelations = relations(industries, ({ many }) => ({
   companies: many(companies),
+  industryDocuments: many(industryDocuments),
+  researchItems: many(researchItems, {
+    relationName: "industryResearch",
+  }),
 }));
 
 export const companiesRelations = relations(companies, ({ one, many }) => ({
@@ -223,6 +333,11 @@ export const companiesRelations = relations(companies, ({ one, many }) => ({
     references: [industries.id],
   }),
   companyDocuments: many(companyDocuments),
+  companyCategories: many(companyCategories),
+  companyMetrics: many(companyMetrics),
+  researchItems: many(researchItems, {
+    relationName: "companyResearch",
+  }),
 }));
 
 export const companyDocumentsRelations = relations(companyDocuments, ({ one }) => ({
@@ -235,6 +350,67 @@ export const companyDocumentsRelations = relations(companyDocuments, ({ one }) =
     references: [documents.id],
   }),
 }));
+
+export const industryDocumentsRelations = relations(industryDocuments, ({ one }) => ({
+  industry: one(industries, {
+    fields: [industryDocuments.industryId],
+    references: [industries.id],
+  }),
+  document: one(documents, {
+    fields: [industryDocuments.documentId],
+    references: [documents.id],
+  }),
+}));
+
+export const categoriesRelations = relations(categories, ({ many }) => ({
+  companyCategories: many(companyCategories),
+}));
+
+export const companyCategoriesRelations = relations(companyCategories, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyCategories.companyId],
+    references: [companies.id],
+  }),
+  category: one(categories, {
+    fields: [companyCategories.categoryId],
+    references: [categories.id],
+  }),
+}));
+
+export const companyMetricsRelations = relations(companyMetrics, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyMetrics.companyId],
+    references: [companies.id],
+  }),
+}));
+
+export const researchItemsRelations = relations(researchItems, ({ many }) => ({
+  sources: many(researchSources),
+}));
+
+export const researchSourcesRelations = relations(researchSources, ({ one }) => ({
+  researchItem: one(researchItems, {
+    fields: [researchSources.researchItemId],
+    references: [researchItems.id],
+  }),
+  document: one(documents, {
+    fields: [researchSources.documentId],
+    references: [documents.id],
+  }),
+  snippet: one(sourceSnippets, {
+    fields: [researchSources.snippetId],
+    references: [sourceSnippets.id],
+  }),
+}));
+
+export const sourceSnippetsRelations = relations(sourceSnippets, ({ one }) => ({
+  document: one(documents, {
+    fields: [sourceSnippets.documentId],
+    references: [documents.id],
+  }),
+}));
+
+export const tasksRelations = relations(tasks, ({ }) => ({}));
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -285,6 +461,45 @@ export const insertIndustrySchema = createInsertSchema(industries).omit({
   createdAt: true,
 });
 
+export const insertIndustryDocumentSchema = createInsertSchema(industryDocuments).omit({
+  createdAt: true,
+});
+
+export const insertCategorySchema = createInsertSchema(categories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompanyCategorySchema = createInsertSchema(companyCategories).omit({
+  createdAt: true,
+});
+
+export const insertCompanyMetricSchema = createInsertSchema(companyMetrics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertResearchItemSchema = createInsertSchema(researchItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertResearchSourceSchema = createInsertSchema(researchSources).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertSourceSnippetSchema = createInsertSchema(sourceSnippets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTaskSchema = createInsertSchema(tasks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,
@@ -326,3 +541,19 @@ export type Company = typeof companies.$inferSelect;
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type CompanyDocument = typeof companyDocuments.$inferSelect;
 export type InsertCompanyDocument = z.infer<typeof insertCompanyDocumentSchema>;
+export type IndustryDocument = typeof industryDocuments.$inferSelect;
+export type InsertIndustryDocument = z.infer<typeof insertIndustryDocumentSchema>;
+export type Category = typeof categories.$inferSelect;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
+export type CompanyCategory = typeof companyCategories.$inferSelect;
+export type InsertCompanyCategory = z.infer<typeof insertCompanyCategorySchema>;
+export type CompanyMetric = typeof companyMetrics.$inferSelect;
+export type InsertCompanyMetric = z.infer<typeof insertCompanyMetricSchema>;
+export type ResearchItem = typeof researchItems.$inferSelect;
+export type InsertResearchItem = z.infer<typeof insertResearchItemSchema>;
+export type ResearchSource = typeof researchSources.$inferSelect;
+export type InsertResearchSource = z.infer<typeof insertResearchSourceSchema>;
+export type SourceSnippet = typeof sourceSnippets.$inferSelect;
+export type InsertSourceSnippet = z.infer<typeof insertSourceSnippetSchema>;
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = z.infer<typeof insertTaskSchema>;

@@ -1,3 +1,4 @@
+import type React from "react";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation, useSearch } from "wouter";
@@ -5,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,7 +32,8 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import type { Document, DocumentPage } from "@shared/schema";
+import type { Document, DocumentPage, SourceSnippet } from "@shared/schema";
+import { documentTypes } from "@shared/schema";
 import { format } from "date-fns";
 
 interface DocumentWithPages extends Document {
@@ -73,10 +77,22 @@ export default function DocumentViewer() {
   const [question, setQuestion] = useState("");
   const [documentAnswer, setDocumentAnswer] = useState<DocumentQAResponse | null>(null);
   const [pageInsight, setPageInsight] = useState<PageInsightResponse | null>(null);
+  const [docTypeValue, setDocTypeValue] = useState("");
+  const [tagsInput, setTagsInput] = useState("");
+  const [snippetForm, setSnippetForm] = useState({ pageNumber: "", title: "", excerpt: "" });
   const pdfContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: document, isLoading } = useQuery<DocumentWithPages>({
     queryKey: ["/api/documents", params.id],
+  });
+
+  const { data: snippets } = useQuery<SourceSnippet[]>({
+    queryKey: ["/api/snippets", params.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/snippets?documentId=${params.id}`);
+      if (!res.ok) throw new Error("Failed to load snippets");
+      return res.json();
+    },
   });
 
   const summaryMutation = useMutation({
@@ -123,6 +139,43 @@ export default function DocumentViewer() {
     },
   });
 
+  const updateDocumentMeta = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", `/api/documents/${params.id}`, {
+        docType: docTypeValue || null,
+        tags: tagsInput
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/documents", params.id] });
+      toast({ title: "Document updated", description: "Type and tags saved" });
+    },
+    onError: (error) => {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const createSnippet = useMutation({
+    mutationFn: async () => {
+      if (!snippetForm.excerpt.trim()) return;
+      await apiRequest("POST", "/api/snippets", {
+        documentId: Number(params.id),
+        pageNumber: snippetForm.pageNumber ? Number(snippetForm.pageNumber) : undefined,
+        title: snippetForm.title || undefined,
+        excerpt: snippetForm.excerpt,
+      });
+    },
+    onSuccess: () => {
+      setSnippetForm({ pageNumber: currentPage.toString(), title: "", excerpt: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/snippets", params.id] });
+      toast({ title: "Snippet saved", description: "Reusable snippet created" });
+    },
+    onError: (error) => toast({ title: "Snippet failed", description: error.message, variant: "destructive" }),
+  });
+
   useEffect(() => {
     if (aiTab === "page" && document) {
       pageInsightMutation.mutate(currentPage);
@@ -142,6 +195,14 @@ export default function DocumentViewer() {
       setPageInsight(null);
     }
   };
+
+  useEffect(() => {
+    if (document) {
+      setDocTypeValue(document.docType || "");
+      setTagsInput(document.tags?.join(", ") || "");
+      setSnippetForm((prev) => ({ ...prev, pageNumber: currentPage.toString() }));
+    }
+  }, [document, currentPage]);
 
   if (isLoading) {
     return <ViewerSkeleton />;
@@ -190,6 +251,92 @@ export default function DocumentViewer() {
               Download
             </a>
           </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 border-b bg-muted/30 p-4 md:grid-cols-[2fr_3fr]">
+        <div className="space-y-2">
+          <div className="grid gap-2 md:grid-cols-[200px_1fr_auto] items-end">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Document type</p>
+              <Select value={docTypeValue} onValueChange={setDocTypeValue}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Unspecified</SelectItem>
+                  {documentTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {getDocumentTypeLabel(type)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Tags (comma separated)</p>
+              <Input
+                placeholder="concall, Q2FY25"
+                value={tagsInput}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagsInput(e.target.value)}
+              />
+            </div>
+            <Button
+              className="w-full md:w-auto"
+              onClick={() => updateDocumentMeta.mutate()}
+              disabled={updateDocumentMeta.isPending}
+            >
+              {updateDocumentMeta.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-2 md:grid-cols-[1fr_auto] items-start">
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground mb-1">Create snippet</p>
+            <div className="grid gap-2 md:grid-cols-3">
+              <Input
+                placeholder="Page"
+                value={snippetForm.pageNumber}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSnippetForm((prev) => ({ ...prev, pageNumber: e.target.value }))
+                }
+              />
+              <Input
+                placeholder="Title (optional)"
+                value={snippetForm.title}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSnippetForm((prev) => ({ ...prev, title: e.target.value }))
+                }
+              />
+              <Button
+                onClick={() => createSnippet.mutate()}
+                disabled={createSnippet.isPending || !snippetForm.excerpt.trim()}
+              >
+                {createSnippet.isPending ? "Saving..." : "Save snippet"}
+              </Button>
+            </div>
+            <Textarea
+              placeholder="Excerpt or quote"
+              value={snippetForm.excerpt}
+              onChange={(e) => setSnippetForm((prev) => ({ ...prev, excerpt: e.target.value }))}
+              rows={2}
+            />
+          </div>
+          <div className="max-h-[140px] overflow-auto text-sm border rounded p-2 bg-background">
+            {snippets && snippets.length > 0 ? (
+              <div className="space-y-1">
+                {snippets.map((snippet) => (
+                  <div key={snippet.id} className="p-2 rounded bg-muted/50">
+                    <p className="text-xs text-muted-foreground">Page {snippet.pageNumber || "-"}</p>
+                    {snippet.title && <p className="font-medium text-sm">{snippet.title}</p>}
+                    <p className="text-xs text-muted-foreground line-clamp-2">{snippet.excerpt}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">No snippets yet</p>
+            )}
+          </div>
         </div>
       </div>
 
