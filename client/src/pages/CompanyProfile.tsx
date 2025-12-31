@@ -38,13 +38,13 @@ type LinkedDocument = {
   linkedAt?: string;
 };
 
-type CompanyResponse = {
-  company: Company & { revenue: number | null };
-  industry: Industry | null;
+type CompanyResponse = Company & {
+  revenue: number | null;
+  industryName: string | null;
   documents: LinkedDocument[];
-  categories: Category[];
-  metrics: CompanyMetric[];
-  research: (ResearchItem & { sources: ResearchSource[] })[];
+  categories?: Category[];
+  metrics?: CompanyMetric[];
+  research?: (ResearchItem & { sources: ResearchSource[] })[];
 };
 
 export default function CompanyProfilePage() {
@@ -106,10 +106,10 @@ export default function CompanyProfilePage() {
   });
 
   useEffect(() => {
-    if (data?.company) {
-      setPipelineStage(data.company.pipelineStage || "");
+    if (data) {
+      setPipelineStage(data.pipelineStage || "");
     }
-  }, [data?.company]);
+  }, [data]);
 
   const linkDocument = useMutation({
     mutationFn: async () => {
@@ -335,10 +335,10 @@ export default function CompanyProfilePage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-semibold">{data.company.name}</h1>
+          <h1 className="text-2xl font-semibold">{data.name}</h1>
           <p className="text-sm text-muted-foreground">Company profile and linked documents</p>
         </div>
-        <Link href={`/industries/${data.company.industryId}`}>
+        <Link href={`/industries/${data.industryId}`}>
           <span className="text-sm text-primary hover:underline">View industry</span>
         </Link>
       </div>
@@ -359,14 +359,14 @@ export default function CompanyProfilePage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-lg">{data.company.name}</span>
-                {data.company.ticker && <Badge variant="secondary">{data.company.ticker}</Badge>}
+                <span className="font-medium text-lg">{data.name}</span>
+                {data.ticker && <Badge variant="secondary">{data.ticker}</Badge>}
               </div>
-              {data.industry && (
-                <p className="text-sm text-muted-foreground">Industry: {data.industry.name}</p>
+              {data.industryName && (
+                <p className="text-sm text-muted-foreground">Industry: {data.industryName}</p>
               )}
-              {data.company.description && (
-                <p className="text-sm text-muted-foreground">{data.company.description}</p>
+              {data.description && (
+                <p className="text-sm text-muted-foreground">{data.description}</p>
               )}
               <div className="grid gap-2 md:grid-cols-[200px_auto] md:items-end">
                 <div>
@@ -392,10 +392,10 @@ export default function CompanyProfilePage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium">Categories</p>
                 <div className="flex flex-wrap gap-2">
-                  {data.categories.length === 0 ? (
+                  {(data.categories || []).length === 0 ? (
                     <span className="text-xs text-muted-foreground">No categories</span>
                   ) : (
-                    data.categories.map((cat) => (
+                    (data.categories || []).map((cat) => (
                       <Badge key={cat.id} variant="outline" className="flex items-center gap-2">
                         {cat.name}
                         <button
@@ -452,7 +452,7 @@ export default function CompanyProfilePage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Created {new Date(data.company.createdAt).toLocaleString()}
+                Created {new Date(data.createdAt).toLocaleString()}
               </p>
             </CardContent>
           </Card>
@@ -552,11 +552,11 @@ export default function CompanyProfilePage() {
                 {upsertMetric.isPending ? "Saving..." : "Save metric"}
               </Button>
 
-              {data.metrics.length === 0 ? (
+              {(data.metrics || []).length === 0 ? (
                 <p className="text-sm text-muted-foreground">No metrics yet.</p>
               ) : (
                 <div className="divide-y">
-                  {data.metrics.map((metric) => (
+                  {(data.metrics || []).map((metric) => (
                     <div key={metric.id} className="py-3 flex items-center justify-between">
                       <div>
                         <p className="font-medium capitalize">{metric.key.replace(/_/g, " ")}</p>
