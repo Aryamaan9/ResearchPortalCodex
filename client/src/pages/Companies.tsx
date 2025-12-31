@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Company, Industry } from "@shared/schema";
+import type { Category, Company, Industry } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 
 type CompanyListItem = Company & { industryName: string | null };
@@ -18,6 +18,11 @@ export default function CompaniesPage() {
 
   const [industryFilter, setIndustryFilter] = useState(initialIndustry);
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [pipelineStage, setPipelineStage] = useState<string>("");
+  const [hasConcall, setHasConcall] = useState(false);
+  const [missingValuation, setMissingValuation] = useState(false);
+  const [sort, setSort] = useState("name");
 
   const [form, setForm] = useState({
     name: "",
@@ -32,12 +37,21 @@ export default function CompaniesPage() {
     queryKey: ["/api/industries"],
   });
 
+  const { data: categoriesList } = useQuery<Category[]>({
+    queryKey: ["/api/categories"],
+  });
+
   const { data: companies, isLoading, refetch } = useQuery<CompanyListItem[]>({
-    queryKey: ["/api/companies", industryFilter, search],
+    queryKey: ["/api/companies", industryFilter, search, categoryFilter, pipelineStage, hasConcall, missingValuation, sort],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (industryFilter && industryFilter !== "all") params.set("industryId", industryFilter);
       if (search) params.set("q", search);
+      if (categoryFilter) params.set("categoryId", categoryFilter);
+      if (pipelineStage) params.set("pipelineStage", pipelineStage);
+      if (hasConcall) params.set("hasLatestConcall", "true");
+      if (missingValuation) params.set("missingValuation", "true");
+      params.set("sort", sort);
       const res = await fetch(`/api/companies${params.toString() ? `?${params.toString()}` : ""}`);
       if (!res.ok) throw new Error("Failed to fetch companies");
       return res.json();
@@ -92,13 +106,66 @@ export default function CompaniesPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="md:col-span-2">
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Category</p>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Any</SelectItem>
+                {categoriesList?.map((cat: any) => (
+                  <SelectItem key={cat.id} value={String(cat.id)}>
+                    {cat.name} ({cat.type})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Pipeline stage</p>
+            <Select value={pipelineStage} onValueChange={setPipelineStage}>
+              <SelectTrigger>
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Any</SelectItem>
+                <SelectItem value="watchlist">Watchlist</SelectItem>
+                <SelectItem value="researching">Researching</SelectItem>
+                <SelectItem value="ic_ready">IC Ready</SelectItem>
+                <SelectItem value="invested">Invested</SelectItem>
+                <SelectItem value="exit_watch">Exit Watch</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
             <p className="text-xs text-muted-foreground mb-1">Search</p>
             <Input
               placeholder="Search by name or ticker"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              className="md:col-span-2"
             />
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={hasConcall} onChange={(e) => setHasConcall(e.target.checked)} />
+            <span>Has latest concall</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={missingValuation} onChange={(e) => setMissingValuation(e.target.checked)} />
+            <span>Missing valuation notes</span>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Sort</p>
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Name</SelectItem>
+                <SelectItem value="createdAt">Created</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
