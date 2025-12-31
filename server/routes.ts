@@ -13,6 +13,7 @@ import { storage } from "./storage";
 import { ObjectStorageService } from "./replit_integrations/object_storage";
 import Anthropic from "@anthropic-ai/sdk";
 import { PDFParse } from "pdf-parse";
+import { registerEntityRoutes } from "./routes/entities";
 
 const anthropic = new Anthropic({
   apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
@@ -719,6 +720,8 @@ Respond with JSON:
       res.status(500).json({ error: "Failed to answer question" });
     }
   });
+
+  registerEntityRoutes(app);
 
   // Get Q&A history
   app.get("/api/qa/history", async (req: Request, res: Response) => {

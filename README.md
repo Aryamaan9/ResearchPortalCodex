@@ -7,3 +7,9 @@ Install the Python dependencies required for spreadsheet extraction before runni
 ```bash
 pip install -r script/requirements.txt
 ```
+
+Apply the Drizzle schema (including industries/companies) to your database:
+
+```bash
+npm run db:push
+```
