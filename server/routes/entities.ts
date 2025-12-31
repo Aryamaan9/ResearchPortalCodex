@@ -14,6 +14,7 @@ export function registerEntityRoutes(app: Express) {
           name: industries.name,
           createdAt: industries.createdAt,
           companyCount: sql<number>`COUNT(${companies.id})`,
+          totalRevenue: sql<number>`SUM(${companies.revenue})`,
         })
         .from(industries)
         .leftJoin(companies, eq(industries.id, companies.industryId))
@@ -72,7 +73,9 @@ export function registerEntityRoutes(app: Express) {
         .where(eq(companies.industryId, industryId))
         .orderBy(companies.name);
 
-      res.json({ ...industry, companies: industryCompanies });
+      const totalRevenue = industryCompanies.reduce((sum, c) => sum + (c.revenue || 0), 0);
+
+      res.json({ ...industry, companies: industryCompanies, totalRevenue });
     } catch (error) {
       console.error("Error fetching industry:", error);
       res.status(500).json({ error: "Failed to fetch industry" });
@@ -131,7 +134,7 @@ export function registerEntityRoutes(app: Express) {
 
   app.post("/api/companies", async (req: Request, res: Response) => {
     try {
-      const { name, ticker, industryId, description } = req.body || {};
+      const { name, ticker, industryId, description, revenue } = req.body || {};
 
       if (!name || typeof name !== "string" || !name.trim()) {
         return res.status(400).json({ error: "Name is required" });
@@ -158,6 +161,7 @@ export function registerEntityRoutes(app: Express) {
           ticker: ticker?.trim() || null,
           industryId: parsedIndustryId,
           description: description?.trim() || null,
+          revenue: revenue ? Number(revenue) : null,
         })
         .returning();
 
@@ -181,6 +185,7 @@ export function registerEntityRoutes(app: Express) {
           name: companies.name,
           ticker: companies.ticker,
           description: companies.description,
+          revenue: companies.revenue,
           createdAt: companies.createdAt,
           industryId: companies.industryId,
           industryName: industries.name,
@@ -212,6 +217,7 @@ export function registerEntityRoutes(app: Express) {
           name: company.name,
           ticker: company.ticker,
           description: company.description,
+          revenue: company.revenue,
           createdAt: company.createdAt,
           industryId: company.industryId,
         },

@@ -102,6 +102,9 @@ export default function CompanyProfilePage() {
           {data.industry && (
             <p className="text-sm text-muted-foreground">Industry: {data.industry.name}</p>
           )}
+          {data.company.revenue && (
+            <p className="text-sm font-medium">Revenue: ${data.company.revenue.toLocaleString()}</p>
+          )}
           {data.company.description && (
             <p className="text-sm text-muted-foreground">{data.company.description}</p>
           )}

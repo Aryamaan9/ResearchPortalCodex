@@ -3,7 +3,10 @@ import { Link, useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Company, Industry } from "@shared/schema";
 
-type IndustryWithCompanies = Industry & { companies: Company[] };
+type IndustryWithCompanies = Industry & { 
+  companies: Company[];
+  totalRevenue?: number;
+};
 
 export default function IndustryDetailPage() {
   const params = useParams<{ id: string }>();
@@ -36,10 +39,15 @@ export default function IndustryDetailPage() {
             <CardHeader>
               <CardTitle>{data.name}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 Created {new Date(data.createdAt).toLocaleString()}
               </p>
+              {data.totalRevenue !== undefined && (
+                <p className="text-lg font-semibold">
+                  Total Industry Revenue: ${data.totalRevenue.toLocaleString()}
+                </p>
+              )}
             </CardContent>
           </Card>
 

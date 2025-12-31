@@ -24,6 +24,7 @@ export default function CompaniesPage() {
     ticker: "",
     industryId: initialIndustry,
     description: "",
+    revenue: "",
   });
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -51,10 +52,11 @@ export default function CompaniesPage() {
         ticker: form.ticker || undefined,
         industryId: form.industryId,
         description: form.description || undefined,
+        revenue: form.revenue ? Number(form.revenue) : undefined,
       });
     },
     onSuccess: () => {
-      setForm({ name: "", ticker: "", industryId: industryFilter, description: "" });
+      setForm({ name: "", ticker: "", industryId: industryFilter, description: "", revenue: "" });
       refetch();
     },
     onError: (err: any) => setFormError(err?.message || "Failed to create company"),
@@ -117,6 +119,12 @@ export default function CompaniesPage() {
               value={form.ticker}
               onChange={(e) => setForm((f) => ({ ...f, ticker: e.target.value }))}
             />
+            <Input
+              type="number"
+              placeholder="Revenue (optional)"
+              value={form.revenue}
+              onChange={(e) => setForm((f) => ({ ...f, revenue: e.target.value }))}
+            />
             <Select
               value={form.industryId}
               onValueChange={(value) => setForm((f) => ({ ...f, industryId: value }))}
@@ -170,6 +178,9 @@ export default function CompaniesPage() {
                       )}
                       {company.industryName && (
                         <p className="text-xs text-muted-foreground">{company.industryName}</p>
+                      )}
+                      {company.revenue && (
+                        <p className="text-xs font-medium">Revenue: ${company.revenue.toLocaleString()}</p>
                       )}
                       {company.description && (
                         <p className="text-sm text-muted-foreground mt-1">{company.description}</p>

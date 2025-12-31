@@ -149,6 +149,7 @@ export const companies = pgTable("companies", {
   ticker: text("ticker"),
   industryId: integer("industry_id").notNull().references(() => industries.id, { onDelete: "cascade" }),
   description: text("description"),
+  revenue: real("revenue"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
   index("companies_industry_id_idx").on(table.industryId),
