@@ -42,7 +42,7 @@ export default function CompanyProfilePage() {
 
   const linkDocument = useMutation({
     mutationFn: async () => {
-      if (!params.id || !selectedDocument) return;
+      if (!params.id || !selectedDocument || selectedDocument === "none") return;
       await apiRequest("POST", `/api/companies/${params.id}/documents`, {
         documentId: Number(selectedDocument),
       });
@@ -122,11 +122,15 @@ export default function CompanyProfilePage() {
                 <SelectValue placeholder="Select a document" />
               </SelectTrigger>
               <SelectContent>
-                {documentOptions.map((doc) => (
-                  <SelectItem key={doc.id} value={doc.id.toString()}>
-                    {doc.title}
-                  </SelectItem>
-                ))}
+                {documentOptions.length === 0 ? (
+                  <SelectItem value="none" disabled>No documents available</SelectItem>
+                ) : (
+                  documentOptions.map((doc) => (
+                    <SelectItem key={doc.id} value={doc.id.toString()}>
+                      {doc.title}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
             <Button

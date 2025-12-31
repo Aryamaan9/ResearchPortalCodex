@@ -35,7 +35,7 @@ export default function CompaniesPage() {
     queryKey: ["/api/companies", industryFilter, search],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (industryFilter) params.set("industryId", industryFilter);
+      if (industryFilter && industryFilter !== "all") params.set("industryId", industryFilter);
       if (search) params.set("q", search);
       const res = await fetch(`/api/companies${params.toString() ? `?${params.toString()}` : ""}`);
       if (!res.ok) throw new Error("Failed to fetch companies");
@@ -81,7 +81,7 @@ export default function CompaniesPage() {
                 <SelectValue placeholder="All industries" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All industries</SelectItem>
+                <SelectItem value="all">All industries</SelectItem>
                 {industries?.map((industry) => (
                   <SelectItem key={industry.id} value={industry.id.toString()}>
                     {industry.name}
