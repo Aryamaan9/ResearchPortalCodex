@@ -752,7 +752,9 @@ async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtraction
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
-    const extractor = spawn("python3", [extractorPath, tempFilePath]);
+    // Use the absolute path to python3 installed in the Nix environment
+    const pythonPath = "/nix/store/2lcqw1d28vklbk8ikiwad28iq2smwndv-python-wrapped-0.1.0/bin/python3";
+    const extractor = spawn(pythonPath, [extractorPath, tempFilePath]);
 
     extractor.stdout.on("data", (data: Buffer) => stdoutChunks.push(data));
     extractor.stderr.on("data", (data: Buffer) => stderrChunks.push(data));
@@ -760,7 +762,7 @@ async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtraction
     extractor.on("error", (err) => {
       resolve({
         sheets: [],
-        error: `Failed to start Excel extractor: ${err.message}. Please ensure python3 is installed.`
+        error: `Failed to start Excel extractor: ${err.message}. Technical details: ${pythonPath} not found.`
       });
     });
 
