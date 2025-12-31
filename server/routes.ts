@@ -7,6 +7,7 @@ import { tmpdir } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
+import os from "os";
 import { spawn } from "child_process";
 import { storage } from "./storage";
 import { ObjectStorageService } from "./replit_integrations/object_storage";
@@ -686,6 +687,51 @@ Respond with JSON:
   return httpServer;
 }
 
+type ExcelSheetResult = {
+  name: string;
+  text?: string;
+  error?: string;
+};
+
+type ExcelExtractionResult = {
+  sheets: ExcelSheetResult[];
+  error?: string;
+};
+
+async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtractionResult> {
+  const extractorPath = path.resolve(process.cwd(), "script", "extract_excel.py");
+
+  return await new Promise((resolve, reject) => {
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    const extractor = spawn("python3", [extractorPath, tempFilePath]);
+
+    extractor.stdout.on("data", (data: Buffer) => stdoutChunks.push(data));
+    extractor.stderr.on("data", (data: Buffer) => stderrChunks.push(data));
+
+    extractor.on("error", (err) => {
+      reject(new Error(`Failed to start Excel extractor: ${err.message}`));
+    });
+
+    extractor.on("close", (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString().trim();
+        reject(new Error(`Excel extractor exited with code ${code}: ${stderr || "unknown error"}`));
+        return;
+      }
+
+      try {
+        const stdout = Buffer.concat(stdoutChunks).toString();
+        const parsed = JSON.parse(stdout) as ExcelExtractionResult;
+        resolve(parsed);
+      } catch (parseError) {
+        reject(new Error(`Failed to parse Excel extractor output: ${parseError}`));
+      }
+    });
+  });
+}
+
 async function runSpreadsheetHelper(fileBuffer: Buffer) {
   const helperScript = [
     "const xlsx = require(\"xlsx\");",
@@ -841,6 +887,54 @@ async function processDocument(documentId: number) {
         extractedText = "Failed to extract PDF text. The document may be scanned or image-based.";
         pageTexts.push(extractedText);
       }
+    } else if (
+      document.fileType.includes("spreadsheet") ||
+      document.fileType.includes("excel") ||
+      document.fileType === "text/csv" ||
+      document.originalFilename.toLowerCase().endsWith(".xlsx") ||
+      document.originalFilename.toLowerCase().endsWith(".xls") ||
+      document.originalFilename.toLowerCase().endsWith(".csv")
+    ) {
+      const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "excel-"));
+      const extension = path.extname(document.originalFilename) || ".xlsx";
+      const tempFilePath = path.join(tempDir, `upload${extension}`);
+
+      try {
+        await fs.promises.writeFile(tempFilePath, fileBuffer);
+        const excelResult = await runExcelExtraction(tempFilePath);
+
+        if (excelResult.error) {
+          throw new Error(excelResult.error);
+        }
+
+        if (!excelResult.sheets.length) {
+          throw new Error("No worksheets were found in the workbook.");
+        }
+
+        for (const sheet of excelResult.sheets) {
+          const sheetLabel = `Sheet: ${sheet.name}`;
+          if (sheet.error) {
+            const errorText = `${sheetLabel}\nError extracting sheet: ${sheet.error}`;
+            pageTexts.push(errorText);
+          } else if (sheet.text) {
+            pageTexts.push(`${sheetLabel}\n${sheet.text}`);
+          }
+        }
+
+        if (pageTexts.length === 0) {
+          throw new Error("Failed to extract any worksheet content.");
+        }
+
+        extractedText = pageTexts.join("\n\n");
+        pageCount = pageTexts.length;
+      } catch (excelError) {
+        console.error("Excel parsing error:", excelError);
+        const errorMessage = excelError instanceof Error ? excelError.message : "Unknown Excel parsing error";
+        extractedText = `Failed to extract spreadsheet content: ${errorMessage}`;
+        pageTexts.push(extractedText);
+      } finally {
+        await fs.promises.rm(tempFilePath, { force: true });
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
     } else if (document.fileType.includes("csv")) {
       extractedText = fileBuffer.toString("utf-8") || "No data found in CSV.";
       pageTexts.push(extractedText);
