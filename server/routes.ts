@@ -2,7 +2,10 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
+import { promises as fs } from "fs";
+import { tmpdir } from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { storage } from "./storage";
 import { ObjectStorageService } from "./replit_integrations/object_storage";
 import Anthropic from "@anthropic-ai/sdk";
@@ -14,6 +17,7 @@ const anthropic = new Anthropic({
 });
 
 const objectStorage = new ObjectStorageService();
+const execFileAsync = promisify(execFile);
 
 // Configure multer for file uploads
 const upload = multer({
@@ -734,9 +738,118 @@ async function processDocument(documentId: number) {
         extractedText = "Failed to extract PDF text. The document may be scanned or image-based.";
         pageTexts.push(extractedText);
       }
-    } else if (document.fileType.includes("spreadsheet") || document.fileType.includes("excel")) {
-      extractedText = "Excel/CSV content extraction not yet implemented.";
+    } else if (document.fileType.includes("csv")) {
+      extractedText = fileBuffer.toString("utf-8") || "No data found in CSV.";
       pageTexts.push(extractedText);
+      pageCount = 1;
+    } else if (document.fileType.includes("spreadsheet") || document.fileType.includes("excel")) {
+      let tempDir: string | null = null;
+      try {
+        tempDir = await fs.mkdtemp(path.join(tmpdir(), "doc-"));
+        const tempFilePath = path.join(
+          tempDir,
+          path.basename(document.originalFilename || "spreadsheet.xlsx")
+        );
+
+        await fs.writeFile(tempFilePath, fileBuffer);
+
+        const pythonScript = `import json, sys, zipfile, xml.etree.ElementTree as ET, re
+
+ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+shared_strings = []
+
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        try:
+            with z.open("xl/sharedStrings.xml") as f:
+                root = ET.fromstring(f.read())
+                for si in root.findall(".//main:si", ns):
+                    parts = []
+                    for t in si.findall(".//main:t", ns):
+                        parts.append(t.text or "")
+                    shared_strings.append("".join(parts))
+        except KeyError:
+            pass
+
+        sheets_info = []
+        try:
+            with z.open("xl/workbook.xml") as f:
+                wb_root = ET.fromstring(f.read())
+                for idx, sheet_el in enumerate(wb_root.findall(".//main:sheet", ns), start=1):
+                    name = sheet_el.attrib.get("name", f"Sheet{idx}")
+                    sheets_info.append((name, f"xl/worksheets/sheet{idx}.xml"))
+        except KeyError:
+            sheets_info.append(("Sheet1", "xl/worksheets/sheet1.xml"))
+
+        output = []
+        for name, sheet_path in sheets_info:
+            try:
+                with z.open(sheet_path) as f:
+                    sheet_root = ET.fromstring(f.read())
+            except KeyError:
+                continue
+
+            rows_text = []
+            for row in sheet_root.findall(".//main:row", ns):
+                cells = []
+                for c in row.findall("main:c", ns):
+                    ref = c.attrib.get("r", "")
+                    match = re.match(r"([A-Z]+)", ref)
+                    col_idx = 0
+                    if match:
+                        for ch in match.group(1):
+                            col_idx = col_idx * 26 + (ord(ch) - 64)
+                        col_idx -= 1
+                    while len(cells) <= col_idx:
+                        cells.append("")
+
+                    v = c.find("main:v", ns)
+                    value = v.text if v is not None else ""
+                    if c.attrib.get("t") == "s":
+                        try:
+                            value = shared_strings[int(value)]
+                        except Exception:
+                            pass
+                    cells[col_idx] = value
+
+                rows_text.append(",".join(cells).rstrip(","))
+
+            output.append({"name": name, "csv": "\n".join(rows_text)})
+
+        print(json.dumps(output))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))`;
+
+        const { stdout } = await execFileAsync("python", ["-c", pythonScript, tempFilePath], {
+          maxBuffer: 10 * 1024 * 1024,
+        });
+
+        const parsed = JSON.parse(stdout.toString() || "[]");
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          pageCount = parsed.length;
+          for (const sheet of parsed) {
+            const content = typeof sheet.csv === "string" && sheet.csv.trim()
+              ? sheet.csv.trim()
+              : "No data found in this sheet.";
+            const sheetName = typeof sheet.name === "string" ? sheet.name : "Sheet";
+            pageTexts.push(`Sheet: ${sheetName}\n${content}`);
+          }
+          extractedText = pageTexts.join("\n\n---\n\n");
+        } else {
+          extractedText = "No readable sheets found in this spreadsheet.";
+          pageTexts.push(extractedText);
+          pageCount = 1;
+        }
+      } catch (sheetError) {
+        console.error("Spreadsheet parsing error:", sheetError);
+        extractedText = "Failed to extract spreadsheet data.";
+        pageTexts.push(extractedText);
+        pageCount = 1;
+      } finally {
+        if (tempDir) {
+          await fs.rm(tempDir, { recursive: true, force: true });
+        }
+      }
     } else if (document.fileType.includes("image")) {
       extractedText = "Image OCR not yet implemented.";
       pageTexts.push(extractedText);

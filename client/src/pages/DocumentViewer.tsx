@@ -82,7 +82,7 @@ export default function DocumentViewer() {
   const summaryMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/summary`, {});
-      return response as SummaryResponse;
+      return response.json() as Promise<SummaryResponse>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/documents", params.id] });
@@ -103,7 +103,7 @@ export default function DocumentViewer() {
   const pageInsightMutation = useMutation({
     mutationFn: async (pageNumber: number) => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/page-insight`, { pageNumber });
-      return response as PageInsightResponse;
+      return response.json() as Promise<PageInsightResponse>;
     },
     onSuccess: (data) => {
       setPageInsight(data);
@@ -113,7 +113,7 @@ export default function DocumentViewer() {
   const documentQAMutation = useMutation({
     mutationFn: async (question: string) => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/ask`, { question });
-      return response as DocumentQAResponse;
+      return response.json() as Promise<DocumentQAResponse>;
     },
     onSuccess: (data) => {
       setDocumentAnswer(data);
