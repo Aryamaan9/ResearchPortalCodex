@@ -12,6 +12,10 @@ import Upload from "@/pages/Upload";
 import Documents from "@/pages/Documents";
 import DocumentViewer from "@/pages/DocumentViewer";
 import Search from "@/pages/Search";
+import IndustriesPage from "@/pages/Industries";
+import IndustryDetailPage from "@/pages/IndustryDetail";
+import CompaniesPage from "@/pages/Companies";
+import CompanyProfilePage from "@/pages/CompanyProfile";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -21,6 +25,10 @@ function Router() {
       <Route path="/upload" component={Upload} />
       <Route path="/documents" component={Documents} />
       <Route path="/documents/:id" component={DocumentViewer} />
+      <Route path="/industries/:id" component={IndustryDetailPage} />
+      <Route path="/industries" component={IndustriesPage} />
+      <Route path="/companies/:id" component={CompanyProfilePage} />
+      <Route path="/companies" component={CompaniesPage} />
       <Route path="/search" component={Search} />
       <Route component={NotFound} />
     </Switch>
