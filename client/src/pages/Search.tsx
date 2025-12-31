@@ -56,17 +56,17 @@ export default function SearchPage() {
   const searchMutation = useMutation({
     mutationFn: async (query: string) => {
       const response = await apiRequest("POST", "/api/search", { query });
-      return response as SearchResponse;
+      return response as unknown as SearchResponse;
     },
     onSuccess: (data) => {
-      setSearchResults(data.results);
+      setSearchResults(data.results || []);
     },
   });
 
   const qaMutation = useMutation({
     mutationFn: async (question: string) => {
       const response = await apiRequest("POST", "/api/qa/ask", { question });
-      return response as QAResponse;
+      return response as unknown as QAResponse;
     },
     onSuccess: (data) => {
       setQaResponse(data);

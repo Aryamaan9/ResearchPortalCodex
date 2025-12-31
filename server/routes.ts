@@ -400,12 +400,32 @@ Respond with JSON:
         return res.status(400).json({ error: "Query is required" });
       }
 
-      // Full-text search on embeddings/chunks
-      const embeddings = await storage.searchEmbeddings(query, 20);
+      // Try full-text search first
+      let searchEmbeddings = await storage.searchEmbeddings(query, 20);
+
+      // If no results, fall back to getting all embeddings and filtering by ILIKE on document titles
+      if (searchEmbeddings.length === 0) {
+        const allDocs = await storage.getDocuments({ search: query });
+        const results = await Promise.all(
+          allDocs.slice(0, 10).map(async (doc) => {
+            const pages = await storage.getDocumentPages(doc.id);
+            const firstPage = pages[0];
+            return {
+              documentId: doc.id,
+              documentTitle: doc.title,
+              documentType: doc.documentType || null,
+              pageNumber: 1,
+              chunkText: firstPage?.pageText?.slice(0, 300) || doc.fullText?.slice(0, 300) || "No preview available",
+              score: 1,
+            };
+          })
+        );
+        return res.json({ results, total: results.length });
+      }
 
       // Get document info for each result
       const results = await Promise.all(
-        embeddings.map(async (emb) => {
+        searchEmbeddings.map(async (emb) => {
           const doc = await storage.getDocument(emb.documentId);
           return {
             documentId: emb.documentId,
@@ -435,24 +455,112 @@ Respond with JSON:
       }
 
       // Search for relevant chunks
-      const relevantChunks = await storage.searchEmbeddings(question, 10);
+      let relevantChunks = await storage.searchEmbeddings(question, 10);
 
+      // If no chunks found via full-text search, get all documents and their pages
       if (relevantChunks.length === 0) {
-        const response = {
-          answer: "I cannot answer this based on the uploaded documents.",
-          citations: [],
-          insufficientEvidence: true,
-        };
+        const allDocs = await storage.getDocuments({});
+        if (allDocs.length === 0) {
+          const response = {
+            answer: "No documents have been uploaded yet. Please upload some documents first.",
+            citations: [],
+            insufficientEvidence: true,
+          };
+          return res.json(response);
+        }
+
+        // Get content from all documents
+        const allContent: Array<{ documentId: number; documentTitle: string; pageNumber: number; chunkText: string }> = [];
+        for (const doc of allDocs.slice(0, 5)) {
+          const pages = await storage.getDocumentPages(doc.id);
+          for (const page of pages) {
+            if (page.pageText) {
+              allContent.push({
+                documentId: doc.id,
+                documentTitle: doc.title,
+                pageNumber: page.pageNumber,
+                chunkText: page.pageText,
+              });
+            }
+          }
+          // Also include full text if no pages
+          if (pages.length === 0 && doc.fullText) {
+            allContent.push({
+              documentId: doc.id,
+              documentTitle: doc.title,
+              pageNumber: 1,
+              chunkText: doc.fullText,
+            });
+          }
+        }
+
+        if (allContent.length === 0) {
+          const response = {
+            answer: "I cannot answer this question - the documents appear to have no extractable text content.",
+            citations: [],
+            insufficientEvidence: true,
+          };
+          return res.json(response);
+        }
+
+        // Use all document content for the query
+        const context = allContent.map((c, i) => 
+          `[Source ${i + 1}: ${c.documentTitle}, Page ${c.pageNumber}]\n${c.chunkText}`
+        ).join("\n\n---\n\n").slice(0, 50000);
+
+        const message = await anthropic.messages.create({
+          model: "claude-sonnet-4-5",
+          max_tokens: 2048,
+          messages: [{
+            role: "user",
+            content: `Answer the following question using ONLY the provided document excerpts.
+Cite sources inline like [Document Title, Page X].
+If you cannot answer from the provided excerpts, say: "I cannot answer this based on the uploaded documents."
+
+Excerpts:
+${context}
+
+Question: ${question}
+
+Respond with JSON:
+{
+  "answer": "your answer with citations inline",
+  "citations": [
+    {"documentId": 1, "documentTitle": "title", "pageNumber": 1, "excerpt": "relevant quote"}
+  ],
+  "insufficientEvidence": false
+}`
+          }],
+        });
+
+        const content = message.content[0];
+        if (content.type !== "text") {
+          throw new Error("Unexpected response type");
+        }
+
+        let response;
+        const jsonMatch = content.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          response = JSON.parse(jsonMatch[0]);
+        } else {
+          response = {
+            answer: content.text,
+            citations: [],
+            insufficientEvidence: false,
+          };
+        }
+
         await storage.createQaHistory({
           question,
           answer: response.answer,
-          citations: [],
-          documentIds: [],
+          citations: response.citations,
+          documentIds: [...new Set(allContent.map(c => c.documentId))],
         });
+
         return res.json(response);
       }
 
-      // Get document info and prepare context
+      // Get document info and prepare context from search results
       const chunksWithDocs = await Promise.all(
         relevantChunks.map(async (chunk) => {
           const doc = await storage.getDocument(chunk.documentId);
