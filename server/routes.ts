@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { spawn } from "child_process";
 import { storage } from "./storage";
 import { ObjectStorageService } from "./replit_integrations/object_storage";
 import Anthropic from "@anthropic-ai/sdk";
@@ -680,6 +681,107 @@ Respond with JSON:
   return httpServer;
 }
 
+async function runSpreadsheetHelper(fileBuffer: Buffer) {
+  const helperScript = [
+    "const xlsx = require(\"xlsx\");",
+    "const chunks = [];",
+    "",
+    "process.stdin.on(\"data\", (chunk) => chunks.push(chunk));",
+    "process.stdin.on(\"end\", () => {",
+    "  try {",
+    "    const buffer = Buffer.concat(chunks);",
+    "    const workbook = xlsx.read(buffer, { type: \"buffer\" });",
+    "    const pages = workbook.SheetNames.map((name) => {",
+    "      const sheet = workbook.Sheets[name];",
+    "      const csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false }).trim();",
+    "      return `[Sheet ${name}]\\n${csv}`;",
+    "    });",
+    "",
+    "    process.stdout.write(JSON.stringify({ pages }));",
+    "  } catch (error) {",
+    "    process.stderr.write(error?.message || String(error));",
+    "    process.exit(1);",
+    "  }",
+    "});",
+    "",
+    "process.stdin.resume();",
+  ].join("\n");
+
+  return new Promise<{ pages: string[]; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", helperScript], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.on("error", reject);
+
+    child.on("close", (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+      if (code === 0) {
+        try {
+          const parsed = JSON.parse(stdout || "{}") as { pages?: string[] };
+          resolve({ pages: parsed.pages || [], stdout, stderr });
+        } catch (parseError) {
+          const err = new Error(
+            parseError instanceof Error
+              ? `Failed to parse spreadsheet helper output: ${parseError.message}`
+              : "Failed to parse spreadsheet helper output"
+          );
+          (err as any).stdout = stdout;
+          (err as any).stderr = stderr;
+          reject(err);
+        }
+      } else {
+        const err = new Error(stderr || "Spreadsheet helper failed");
+        (err as any).stdout = stdout;
+        (err as any).stderr = stderr;
+        reject(err);
+      }
+    });
+
+    child.stdin.write(fileBuffer);
+    child.stdin.end();
+  });
+}
+
+function buildSpreadsheetError(
+  fileType: string,
+  stdout: string,
+  stderr: string,
+  error: unknown
+) {
+  const helperDetail = [stderr.trim(), stdout.trim()]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  const errorMessage = error instanceof Error ? error.message : "";
+  const combined = [helperDetail, errorMessage]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  let userMessage = "We couldn't process this spreadsheet due to an internal error.";
+
+  if (fileType === "application/vnd.ms-excel") {
+    userMessage = "Legacy .xls spreadsheets aren't supported. Please re-save the file as .xlsx or CSV and upload it again.";
+  } else if (/unsupported|not supported|file type/i.test(combined)) {
+    userMessage = "This spreadsheet format isn't supported. Try exporting it as .xlsx or CSV and re-uploading.";
+  } else if (/corrupt|corrupted|invalid|damaged|unexpected end|signature|cannot read/i.test(combined)) {
+    userMessage = "The spreadsheet appears to be corrupted or unreadable. Please generate a fresh export and try again.";
+  }
+
+  return {
+    userMessage,
+    detail: combined || undefined,
+  };
+}
+
 // Background document processing function
 async function processDocument(documentId: number) {
   try {
@@ -735,8 +837,44 @@ async function processDocument(documentId: number) {
         pageTexts.push(extractedText);
       }
     } else if (document.fileType.includes("spreadsheet") || document.fileType.includes("excel")) {
-      extractedText = "Excel/CSV content extraction not yet implemented.";
-      pageTexts.push(extractedText);
+      try {
+        if (document.fileType === "application/vnd.ms-excel") {
+          throw new Error("Unsupported legacy .xls format");
+        }
+
+        const helperResult = await runSpreadsheetHelper(fileBuffer);
+
+        if (!helperResult.pages.length) {
+          throw Object.assign(new Error("Spreadsheet helper returned no content"), helperResult);
+        }
+
+        extractedText = helperResult.pages.join("\n\n");
+        pageTexts.push(...helperResult.pages);
+        pageCount = helperResult.pages.length;
+      } catch (sheetError) {
+        const helperStdout = (sheetError as any)?.stdout || "";
+        const helperStderr = (sheetError as any)?.stderr || "";
+        const { userMessage, detail } = buildSpreadsheetError(
+          document.fileType,
+          helperStdout,
+          helperStderr,
+          sheetError
+        );
+
+        const pageTextMessage = detail
+          ? `${userMessage}\n\nHelper output:\n${detail}`
+          : userMessage;
+
+        extractedText = pageTextMessage;
+        pageTexts.push(pageTextMessage);
+
+        await storage.updateDocument(documentId, {
+          processingStatus: "failed",
+          errorMessage: userMessage,
+        });
+
+        return;
+      }
     } else if (document.fileType.includes("image")) {
       extractedText = "Image OCR not yet implemented.";
       pageTexts.push(extractedText);
