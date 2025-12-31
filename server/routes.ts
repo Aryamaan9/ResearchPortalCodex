@@ -22,6 +22,9 @@ const anthropic = new Anthropic({
 const objectStorage = new ObjectStorageService();
 const execFileAsync = promisify(execFile);
 
+// In-memory cache for file buffers when Object Storage is not configured
+const fileBufferCache = new Map<number, Buffer>();
+
 // Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -72,28 +75,47 @@ export async function registerRoutes(
       const file = req.file;
       const title = file.originalname.replace(/\.[^/.]+$/, "");
       
-      // Get upload URL from object storage
-      const uploadURL = await objectStorage.getObjectEntityUploadURL();
-      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+      let filePath: string;
+      let objectPath: string;
       
-      // Upload file to object storage
-      await fetch(uploadURL, {
-        method: "PUT",
-        body: file.buffer,
-        headers: {
-          "Content-Type": file.mimetype,
-        },
-      });
+      try {
+        // Try to use Object Storage if configured
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+        
+        // Upload file to object storage
+        const uploadResponse = await fetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: {
+            "Content-Type": file.mimetype,
+          },
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("Object Storage upload failed");
+        }
+        
+        filePath = objectPath;
+      } catch (storageError) {
+        console.warn("Object Storage not configured, using temporary storage:", storageError);
+        // Fallback: store file buffer directly in database or use a temporary path
+        // For now, we'll use a placeholder path and store the buffer in memory
+        filePath = `/temp/${Date.now()}_${file.originalname}`;
+      }
 
       // Create document record
       const document = await storage.createDocument({
         title,
         originalFilename: file.originalname,
-        filePath: objectPath,
+        filePath: filePath,
         fileSizeBytes: file.size,
         fileType: file.mimetype,
         processingStatus: "pending",
       });
+
+      // Store file buffer temporarily for processing
+      fileBufferCache.set(document.id, file.buffer);
 
       // Start processing in background
       processDocument(document.id).catch(console.error);
@@ -164,9 +186,22 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Document not found" });
       }
 
-      const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
-      res.setHeader("Content-Disposition", `attachment; filename="${document.originalFilename}"`);
-      await objectStorage.downloadObject(objectFile, res);
+      // Check if file is in cache first
+      const cachedBuffer = fileBufferCache.get(id);
+      if (cachedBuffer) {
+        res.setHeader("Content-Disposition", `attachment; filename="${document.originalFilename}"`);
+        res.setHeader("Content-Type", document.fileType);
+        return res.send(cachedBuffer);
+      }
+
+      // Try Object Storage
+      try {
+        const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
+        res.setHeader("Content-Disposition", `attachment; filename="${document.originalFilename}"`);
+        await objectStorage.downloadObject(objectFile, res);
+      } catch (storageError) {
+        return res.status(404).json({ error: "File not found in storage" });
+      }
     } catch (error) {
       console.error("Error downloading document:", error);
       res.status(500).json({ error: "Failed to download document" });
@@ -182,9 +217,21 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Document not found" });
       }
 
-      const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
-      res.setHeader("Content-Type", document.fileType);
-      await objectStorage.downloadObject(objectFile, res);
+      // Check if file is in cache first
+      const cachedBuffer = fileBufferCache.get(id);
+      if (cachedBuffer) {
+        res.setHeader("Content-Type", document.fileType);
+        return res.send(cachedBuffer);
+      }
+
+      // Try Object Storage
+      try {
+        const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
+        res.setHeader("Content-Type", document.fileType);
+        await objectStorage.downloadObject(objectFile, res);
+      } catch (storageError) {
+        return res.status(404).json({ error: "File not found in storage" });
+      }
     } catch (error) {
       console.error("Error viewing document:", error);
       res.status(500).json({ error: "Failed to view document" });
@@ -841,18 +888,30 @@ async function processDocument(documentId: number) {
     const document = await storage.getDocument(documentId);
     if (!document) return;
 
-    // Get file buffer from object storage
-    const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
-    const chunks: Buffer[] = [];
-    const downloadStream = objectFile.createReadStream();
+    // Get file buffer from cache or object storage
+    let fileBuffer: Buffer;
+    const cachedBuffer = fileBufferCache.get(documentId);
     
-    await new Promise<void>((resolve, reject) => {
-      downloadStream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      downloadStream.on("end", () => resolve());
-      downloadStream.on("error", reject);
-    });
-    
-    const fileBuffer = Buffer.concat(chunks);
+    if (cachedBuffer) {
+      fileBuffer = cachedBuffer;
+    } else {
+      // Try to get from object storage
+      try {
+        const objectFile = await objectStorage.getObjectEntityFile(document.filePath);
+        const chunks: Buffer[] = [];
+        const downloadStream = objectFile.createReadStream();
+        
+        await new Promise<void>((resolve, reject) => {
+          downloadStream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          downloadStream.on("end", () => resolve());
+          downloadStream.on("error", reject);
+        });
+        
+        fileBuffer = Buffer.concat(chunks);
+      } catch (storageError) {
+        throw new Error("File not found in storage or cache");
+      }
+    }
     
     let extractedText = "";
     let pageCount = 1;
