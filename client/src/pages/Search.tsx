@@ -56,7 +56,8 @@ export default function SearchPage() {
   const searchMutation = useMutation({
     mutationFn: async (query: string) => {
       const response = await apiRequest("POST", "/api/search", { query });
-      return response as unknown as SearchResponse;
+      const data = await response.json();
+      return data as SearchResponse;
     },
     onSuccess: (data) => {
       setSearchResults(data.results || []);
@@ -66,7 +67,8 @@ export default function SearchPage() {
   const qaMutation = useMutation({
     mutationFn: async (question: string) => {
       const response = await apiRequest("POST", "/api/qa/ask", { question });
-      return response as unknown as QAResponse;
+      const data = await response.json();
+      return data as QAResponse;
     },
     onSuccess: (data) => {
       setQaResponse(data);
