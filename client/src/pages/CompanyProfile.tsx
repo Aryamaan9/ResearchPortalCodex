@@ -376,7 +376,7 @@ export default function CompanyProfilePage() {
                       <SelectValue placeholder="Select stage" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Unassigned</SelectItem>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
                       {PIPELINE_STAGES.map((stage) => (
                         <SelectItem key={stage.value} value={stage.value}>
                           {stage.label}
@@ -417,7 +417,7 @@ export default function CompanyProfilePage() {
                       <SelectValue placeholder="Assign category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {categories?.map((cat) => (
+                      {(categories || []).map((cat) => (
                         <SelectItem key={cat.id} value={cat.id.toString()}>
                           {cat.name} ({cat.type})
                         </SelectItem>

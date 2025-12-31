@@ -98,7 +98,7 @@ export default function CompaniesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All industries</SelectItem>
-                {industries?.map((industry) => (
+                {(industries || []).map((industry) => (
                   <SelectItem key={industry.id} value={industry.id.toString()}>
                     {industry.name}
                   </SelectItem>
@@ -113,8 +113,9 @@ export default function CompaniesPage() {
                 <SelectValue placeholder="Any" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Any</SelectItem>
-                {categoriesList?.map((cat: any) => (
+                <SelectItem value="none" disabled={true}>Any</SelectItem>
+                <SelectItem value="placeholder-hack" className="hidden">Any</SelectItem>
+                {(categoriesList || []).map((cat: any) => (
                   <SelectItem key={cat.id} value={String(cat.id)}>
                     {cat.name} ({cat.type})
                   </SelectItem>
@@ -129,7 +130,7 @@ export default function CompaniesPage() {
                 <SelectValue placeholder="Any" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Any</SelectItem>
+                <SelectItem value="none" disabled={true}>Any</SelectItem>
                 <SelectItem value="watchlist">Watchlist</SelectItem>
                 <SelectItem value="researching">Researching</SelectItem>
                 <SelectItem value="ic_ready">IC Ready</SelectItem>
@@ -200,7 +201,7 @@ export default function CompaniesPage() {
                 <SelectValue placeholder="Select industry" />
               </SelectTrigger>
               <SelectContent>
-                {industries?.map((industry) => (
+                {(industries || []).map((industry) => (
                   <SelectItem key={industry.id} value={industry.id.toString()}>
                     {industry.name}
                   </SelectItem>
