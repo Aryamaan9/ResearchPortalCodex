@@ -6,7 +6,6 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import fs from "fs";
 import os from "os";
 import { spawn } from "child_process";
 import { storage } from "./storage";
@@ -969,12 +968,12 @@ async function processDocument(documentId: number) {
       document.originalFilename.toLowerCase().endsWith(".xls") ||
       document.originalFilename.toLowerCase().endsWith(".csv")
     ) {
-      const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "excel-"));
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "excel-"));
       const extension = path.extname(document.originalFilename) || ".xlsx";
       const tempFilePath = path.join(tempDir, `upload${extension}`);
 
       try {
-        await fs.promises.writeFile(tempFilePath, fileBuffer);
+        await fs.writeFile(tempFilePath, fileBuffer);
         const excelResult = await runExcelExtraction(tempFilePath);
 
         if (excelResult.error) {
@@ -1007,8 +1006,8 @@ async function processDocument(documentId: number) {
         extractedText = `Failed to extract spreadsheet content: ${errorMessage}`;
         pageTexts.push(extractedText);
       } finally {
-        await fs.promises.rm(tempFilePath, { force: true });
-        await fs.promises.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(tempFilePath, { force: true });
+        await fs.rm(tempDir, { recursive: true, force: true });
       }
     } else if (document.fileType.includes("image")) {
       extractedText = "Image OCR not yet implemented.";

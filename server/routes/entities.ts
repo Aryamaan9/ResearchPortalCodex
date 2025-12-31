@@ -103,6 +103,7 @@ export function registerEntityRoutes(app: Express) {
         );
       }
 
+      const baseQuery = db
       let query = db
         .select({
           id: companies.id,
@@ -116,6 +117,10 @@ export function registerEntityRoutes(app: Express) {
         .from(companies)
         .leftJoin(industries, eq(companies.industryId, industries.id));
 
+      const filteredQuery =
+        conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
+
+      const results = await filteredQuery.orderBy(companies.name);
       if (conditions.length > 0) {
         query = query.where(and(...conditions));
       }
