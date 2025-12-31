@@ -105,6 +105,12 @@ export default function CompanyProfilePage() {
     },
   });
 
+  useEffect(() => {
+    if (data?.company) {
+      setPipelineStage(data.company.pipelineStage || "");
+    }
+  }, [data?.company]);
+
   const linkDocument = useMutation({
     mutationFn: async () => {
       if (!params.id || !selectedDocument || selectedDocument === "none") return;
@@ -310,12 +316,6 @@ export default function CompanyProfilePage() {
       </div>
     );
   }
-
-  useEffect(() => {
-    if (data?.company) {
-      setPipelineStage(data.company.pipelineStage || "");
-    }
-  }, [data?.company]);
 
   const researchBySection = (section: string) => data.research.filter((r) => r.section === section);
 
