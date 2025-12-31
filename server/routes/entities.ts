@@ -104,6 +104,7 @@ export function registerEntityRoutes(app: Express) {
       }
 
       const baseQuery = db
+      let query = db
         .select({
           id: companies.id,
           name: companies.name,
@@ -120,6 +121,11 @@ export function registerEntityRoutes(app: Express) {
         conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
 
       const results = await filteredQuery.orderBy(companies.name);
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions));
+      }
+
+      const results = await query.orderBy(companies.name);
       res.json(results);
     } catch (error) {
       console.error("Error fetching companies:", error);
