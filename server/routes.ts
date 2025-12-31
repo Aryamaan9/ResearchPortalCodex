@@ -2,6 +2,10 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
+import { promises as fs } from "fs";
+import { tmpdir } from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import fs from "fs";
 import os from "os";
 import { spawn } from "child_process";
@@ -16,6 +20,7 @@ const anthropic = new Anthropic({
 });
 
 const objectStorage = new ObjectStorageService();
+const execFileAsync = promisify(execFile);
 
 // Configure multer for file uploads
 const upload = multer({
@@ -727,6 +732,107 @@ async function runExcelExtraction(tempFilePath: string): Promise<ExcelExtraction
   });
 }
 
+async function runSpreadsheetHelper(fileBuffer: Buffer) {
+  const helperScript = [
+    "const xlsx = require(\"xlsx\");",
+    "const chunks = [];",
+    "",
+    "process.stdin.on(\"data\", (chunk) => chunks.push(chunk));",
+    "process.stdin.on(\"end\", () => {",
+    "  try {",
+    "    const buffer = Buffer.concat(chunks);",
+    "    const workbook = xlsx.read(buffer, { type: \"buffer\" });",
+    "    const pages = workbook.SheetNames.map((name) => {",
+    "      const sheet = workbook.Sheets[name];",
+    "      const csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false }).trim();",
+    "      return `[Sheet ${name}]\\n${csv}`;",
+    "    });",
+    "",
+    "    process.stdout.write(JSON.stringify({ pages }));",
+    "  } catch (error) {",
+    "    process.stderr.write(error?.message || String(error));",
+    "    process.exit(1);",
+    "  }",
+    "});",
+    "",
+    "process.stdin.resume();",
+  ].join("\n");
+
+  return new Promise<{ pages: string[]; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", helperScript], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.on("error", reject);
+
+    child.on("close", (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+      if (code === 0) {
+        try {
+          const parsed = JSON.parse(stdout || "{}") as { pages?: string[] };
+          resolve({ pages: parsed.pages || [], stdout, stderr });
+        } catch (parseError) {
+          const err = new Error(
+            parseError instanceof Error
+              ? `Failed to parse spreadsheet helper output: ${parseError.message}`
+              : "Failed to parse spreadsheet helper output"
+          );
+          (err as any).stdout = stdout;
+          (err as any).stderr = stderr;
+          reject(err);
+        }
+      } else {
+        const err = new Error(stderr || "Spreadsheet helper failed");
+        (err as any).stdout = stdout;
+        (err as any).stderr = stderr;
+        reject(err);
+      }
+    });
+
+    child.stdin.write(fileBuffer);
+    child.stdin.end();
+  });
+}
+
+function buildSpreadsheetError(
+  fileType: string,
+  stdout: string,
+  stderr: string,
+  error: unknown
+) {
+  const helperDetail = [stderr.trim(), stdout.trim()]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  const errorMessage = error instanceof Error ? error.message : "";
+  const combined = [helperDetail, errorMessage]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  let userMessage = "We couldn't process this spreadsheet due to an internal error.";
+
+  if (fileType === "application/vnd.ms-excel") {
+    userMessage = "Legacy .xls spreadsheets aren't supported. Please re-save the file as .xlsx or CSV and upload it again.";
+  } else if (/unsupported|not supported|file type/i.test(combined)) {
+    userMessage = "This spreadsheet format isn't supported. Try exporting it as .xlsx or CSV and re-uploading.";
+  } else if (/corrupt|corrupted|invalid|damaged|unexpected end|signature|cannot read/i.test(combined)) {
+    userMessage = "The spreadsheet appears to be corrupted or unreadable. Please generate a fresh export and try again.";
+  }
+
+  return {
+    userMessage,
+    detail: combined || undefined,
+  };
+}
+
 // Background document processing function
 async function processDocument(documentId: number) {
   try {
@@ -829,6 +935,155 @@ async function processDocument(documentId: number) {
       } finally {
         await fs.promises.rm(tempFilePath, { force: true });
         await fs.promises.rm(tempDir, { recursive: true, force: true });
+    } else if (document.fileType.includes("csv")) {
+      extractedText = fileBuffer.toString("utf-8") || "No data found in CSV.";
+      pageTexts.push(extractedText);
+      pageCount = 1;
+    } else if (document.fileType.includes("spreadsheet") || document.fileType.includes("excel")) {
+      let tempDir: string | null = null;
+      try {
+        tempDir = await fs.mkdtemp(path.join(tmpdir(), "doc-"));
+        const tempFilePath = path.join(
+          tempDir,
+          path.basename(document.originalFilename || "spreadsheet.xlsx")
+        );
+
+        await fs.writeFile(tempFilePath, fileBuffer);
+
+        const pythonScript = `import json, sys, zipfile, xml.etree.ElementTree as ET, re
+
+ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+shared_strings = []
+
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        try:
+            with z.open("xl/sharedStrings.xml") as f:
+                root = ET.fromstring(f.read())
+                for si in root.findall(".//main:si", ns):
+                    parts = []
+                    for t in si.findall(".//main:t", ns):
+                        parts.append(t.text or "")
+                    shared_strings.append("".join(parts))
+        except KeyError:
+            pass
+
+        sheets_info = []
+        try:
+            with z.open("xl/workbook.xml") as f:
+                wb_root = ET.fromstring(f.read())
+                for idx, sheet_el in enumerate(wb_root.findall(".//main:sheet", ns), start=1):
+                    name = sheet_el.attrib.get("name", f"Sheet{idx}")
+                    sheets_info.append((name, f"xl/worksheets/sheet{idx}.xml"))
+        except KeyError:
+            sheets_info.append(("Sheet1", "xl/worksheets/sheet1.xml"))
+
+        output = []
+        for name, sheet_path in sheets_info:
+            try:
+                with z.open(sheet_path) as f:
+                    sheet_root = ET.fromstring(f.read())
+            except KeyError:
+                continue
+
+            rows_text = []
+            for row in sheet_root.findall(".//main:row", ns):
+                cells = []
+                for c in row.findall("main:c", ns):
+                    ref = c.attrib.get("r", "")
+                    match = re.match(r"([A-Z]+)", ref)
+                    col_idx = 0
+                    if match:
+                        for ch in match.group(1):
+                            col_idx = col_idx * 26 + (ord(ch) - 64)
+                        col_idx -= 1
+                    while len(cells) <= col_idx:
+                        cells.append("")
+
+                    v = c.find("main:v", ns)
+                    value = v.text if v is not None else ""
+                    if c.attrib.get("t") == "s":
+                        try:
+                            value = shared_strings[int(value)]
+                        except Exception:
+                            pass
+                    cells[col_idx] = value
+
+                rows_text.append(",".join(cells).rstrip(","))
+
+            output.append({"name": name, "csv": "\n".join(rows_text)})
+
+        print(json.dumps(output))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))`;
+
+        const { stdout } = await execFileAsync("python", ["-c", pythonScript, tempFilePath], {
+          maxBuffer: 10 * 1024 * 1024,
+        });
+
+        const parsed = JSON.parse(stdout.toString() || "[]");
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          pageCount = parsed.length;
+          for (const sheet of parsed) {
+            const content = typeof sheet.csv === "string" && sheet.csv.trim()
+              ? sheet.csv.trim()
+              : "No data found in this sheet.";
+            const sheetName = typeof sheet.name === "string" ? sheet.name : "Sheet";
+            pageTexts.push(`Sheet: ${sheetName}\n${content}`);
+          }
+          extractedText = pageTexts.join("\n\n---\n\n");
+        } else {
+          extractedText = "No readable sheets found in this spreadsheet.";
+          pageTexts.push(extractedText);
+          pageCount = 1;
+        }
+      } catch (sheetError) {
+        console.error("Spreadsheet parsing error:", sheetError);
+        extractedText = "Failed to extract spreadsheet data.";
+        pageTexts.push(extractedText);
+        pageCount = 1;
+      } finally {
+        if (tempDir) {
+          await fs.rm(tempDir, { recursive: true, force: true });
+        }
+    } else if (document.fileType.includes("spreadsheet") || document.fileType.includes("excel")) {
+      try {
+        if (document.fileType === "application/vnd.ms-excel") {
+          throw new Error("Unsupported legacy .xls format");
+        }
+
+        const helperResult = await runSpreadsheetHelper(fileBuffer);
+
+        if (!helperResult.pages.length) {
+          throw Object.assign(new Error("Spreadsheet helper returned no content"), helperResult);
+        }
+
+        extractedText = helperResult.pages.join("\n\n");
+        pageTexts.push(...helperResult.pages);
+        pageCount = helperResult.pages.length;
+      } catch (sheetError) {
+        const helperStdout = (sheetError as any)?.stdout || "";
+        const helperStderr = (sheetError as any)?.stderr || "";
+        const { userMessage, detail } = buildSpreadsheetError(
+          document.fileType,
+          helperStdout,
+          helperStderr,
+          sheetError
+        );
+
+        const pageTextMessage = detail
+          ? `${userMessage}\n\nHelper output:\n${detail}`
+          : userMessage;
+
+        extractedText = pageTextMessage;
+        pageTexts.push(pageTextMessage);
+
+        await storage.updateDocument(documentId, {
+          processingStatus: "failed",
+          errorMessage: userMessage,
+        });
+
+        return;
       }
     } else if (document.fileType.includes("image")) {
       extractedText = "Image OCR not yet implemented.";

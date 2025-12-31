@@ -83,6 +83,7 @@ export default function DocumentViewer() {
     mutationFn: async () => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/summary`, {});
       return (await response.json()) as SummaryResponse;
+      return response.json() as Promise<SummaryResponse>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/documents", params.id] });
@@ -104,6 +105,7 @@ export default function DocumentViewer() {
     mutationFn: async (pageNumber: number) => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/page-insight`, { pageNumber });
       return (await response.json()) as PageInsightResponse;
+      return response.json() as Promise<PageInsightResponse>;
     },
     onSuccess: (data) => {
       setPageInsight(data);
@@ -114,6 +116,7 @@ export default function DocumentViewer() {
     mutationFn: async (question: string) => {
       const response = await apiRequest("POST", `/api/documents/${params.id}/ask`, { question });
       return (await response.json()) as DocumentQAResponse;
+      return response.json() as Promise<DocumentQAResponse>;
     },
     onSuccess: (data) => {
       setDocumentAnswer(data);

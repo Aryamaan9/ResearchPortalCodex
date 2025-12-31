@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DocumentTypeIcon, getDocumentTypeLabel } from "@/components/DocumentTypeIcon";
 import { EmptyState } from "@/components/EmptyState";
-import { Search, FileText, Upload, Calendar, Filter, Eye, Trash2 } from "lucide-react";
+import { Search, FileText, Upload, Calendar, Filter, Eye, ArrowUpWideNarrow, CheckCircle2, Clock3, AlertCircle, FileWarning } from "lucide-react";
 import { documentTypes, type Document, type DocumentType, type ProcessingStatus } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -24,6 +24,7 @@ export default function DocumentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortOption, setSortOption] = useState("newest");
 
   // Build query URL with parameters
   const buildQueryUrl = () => {
@@ -45,13 +46,39 @@ export default function DocumentsPage() {
 
   const documents = data?.documents || [];
   const filteredDocs = documents.filter((doc) => {
-    const matchesSearch = !searchQuery || 
+    const matchesSearch = !searchQuery ||
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.originalFilename.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = typeFilter === "all" || doc.documentType === typeFilter;
     const matchesStatus = statusFilter === "all" || doc.processingStatus === statusFilter;
     return matchesSearch && matchesType && matchesStatus;
   });
+
+  const sortedDocs = [...filteredDocs].sort((a, b) => {
+    switch (sortOption) {
+      case "oldest":
+        return new Date(a.uploadDate).getTime() - new Date(b.uploadDate).getTime();
+      case "title":
+        return a.title.localeCompare(b.title);
+      case "size":
+        return b.fileSizeBytes - a.fileSizeBytes;
+      default:
+        return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime();
+    }
+  });
+
+  const statusCounts = filteredDocs.reduce(
+    (acc, doc) => {
+      acc[doc.processingStatus as ProcessingStatus] += 1;
+      return acc;
+    },
+    {
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+    } as Record<ProcessingStatus, number>
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -110,7 +137,30 @@ export default function DocumentsPage() {
                   <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={sortOption} onValueChange={setSortOption}>
+                <SelectTrigger className="w-[170px]" data-testid="select-sort">
+                  <ArrowUpWideNarrow className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">Newest first</SelectItem>
+                  <SelectItem value="oldest">Oldest first</SelectItem>
+                  <SelectItem value="title">Title A-Z</SelectItem>
+                  <SelectItem value="size">Largest files</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4">
+            {typeFilter !== "all" && (
+              <Badge variant="secondary" className="text-xs">Type: {getDocumentTypeLabel(typeFilter as DocumentType)}</Badge>
+            )}
+            {statusFilter !== "all" && (
+              <Badge variant="secondary" className="text-xs">Status: {statusFilter}</Badge>
+            )}
+            {(typeFilter !== "all" || statusFilter !== "all" || searchQuery) && (
+              <Button variant="ghost" size="sm" onClick={() => { setTypeFilter("all"); setStatusFilter("all"); setSearchQuery(""); }} data-testid="button-clear-filters">Clear filters</Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -130,7 +180,7 @@ export default function DocumentsPage() {
           ) : (
             <ScrollArea className="h-[600px]">
               <div className="space-y-3">
-                {filteredDocs.map((doc) => (
+                {sortedDocs.map((doc) => (
                   <DocumentCard key={doc.id} document={doc} />
                 ))}
               </div>
@@ -138,7 +188,60 @@ export default function DocumentsPage() {
           )}
         </CardContent>
       </Card>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatusCard
+          label="Completed"
+          value={statusCounts.completed}
+          icon={CheckCircle2}
+          tone="text-green-600"
+        />
+        <StatusCard
+          label="Processing"
+          value={statusCounts.processing}
+          icon={Clock3}
+          tone="text-blue-600"
+        />
+        <StatusCard
+          label="Pending"
+          value={statusCounts.pending}
+          icon={FileWarning}
+          tone="text-amber-600"
+        />
+        <StatusCard
+          label="Failed"
+          value={statusCounts.failed}
+          icon={AlertCircle}
+          tone="text-red-600"
+        />
+      </div>
     </div>
+  );
+}
+
+function StatusCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+}) {
+  return (
+    <Card className="border-dashed bg-muted/30">
+      <CardContent className="p-4 flex items-center gap-3">
+        <div className={`h-10 w-10 rounded-md bg-background flex items-center justify-center border ${tone}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-xl font-semibold" data-testid={`text-status-${label.toLowerCase()}`}>{value}</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
