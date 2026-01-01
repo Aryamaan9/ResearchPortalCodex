@@ -1272,7 +1272,7 @@ export function registerEntityRoutes(app: Express) {
           type: sql`'metric'`,
           id: companyMetrics.id,
           title: companyMetrics.key,
-          section: companyMetrics.period,
+          section: sql<string>`COALESCE(${companyMetrics.period}, 'Metric')`,
           createdAt: companyMetrics.updatedAt,
         })
         .from(companyMetrics)

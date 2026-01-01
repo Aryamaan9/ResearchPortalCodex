@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
+import { Pin, Edit2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,8 +9,19 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { Company, CompanyMetric, Document, Industry, Task } from "@shared/schema";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { Company, CompanyMetric, Document, Industry, Task, ResearchItem, ResearchSource } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+
+const RESEARCH_SECTIONS = [
+  { key: "market_overview", label: "Market Overview" },
+  { key: "competitive_landscape", label: "Competitive Landscape" },
+  { key: "trends", label: "Trends & Drivers" },
+  { key: "regulations", label: "Regulatory Environment" },
+  { key: "risks", label: "Risks & Challenges" },
+  { key: "opportunities", label: "Opportunities" },
+  { key: "other", label: "Other" },
+];
 
 type IndustryWithCompanies = Industry & {
   companies: Company[];
@@ -30,6 +42,9 @@ export default function IndustryDetailPage() {
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(["revenue"]);
   const [selectedDocument, setSelectedDocument] = useState<string>("");
   const [taskForm, setTaskForm] = useState({ title: "", description: "", status: "todo", priority: "medium", dueDate: "" });
+  const [researchForm, setResearchForm] = useState({ section: "market_overview", title: "", content: "" });
+  const [editingResearchId, setEditingResearchId] = useState<number | null>(null);
+  const [editResearchForm, setEditResearchForm] = useState({ section: "", title: "", content: "" });
 
   const { data, isLoading, error, refetch } = useQuery<IndustryWithCompanies>({
     queryKey: ["/api/industries", params.id],
@@ -50,6 +65,15 @@ export default function IndustryDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/tasks?entityType=industry&entityId=${params.id}`);
       if (!res.ok) throw new Error("Failed to load tasks");
+      return res.json();
+    },
+  });
+
+  const { data: research = [], refetch: refetchResearch } = useQuery<(ResearchItem & { sources: ResearchSource[] })[]>({
+    queryKey: ["/api/research", "industry", params.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/research?entityType=industry&entityId=${params.id}`);
+      if (!res.ok) throw new Error("Failed to load research");
       return res.json();
     },
   });
@@ -132,11 +156,70 @@ export default function IndustryDetailPage() {
     onSuccess: () => refetchTasks(),
   });
 
+  const createResearchItem = useMutation({
+    mutationFn: async () => {
+      if (!params.id) return;
+      await apiRequest("POST", "/api/research", {
+        entityType: "industry",
+        entityId: Number(params.id),
+        section: researchForm.section,
+        title: researchForm.title,
+        content: researchForm.content || null,
+      });
+    },
+    onSuccess: () => {
+      setResearchForm({ section: "market_overview", title: "", content: "" });
+      refetchResearch();
+    },
+  });
+
+  const updateResearch = useMutation({
+    mutationFn: async ({ researchId, data }: { researchId: number; data: { title?: string; content?: string; section?: string } }) => {
+      await apiRequest("PATCH", `/api/research/${researchId}`, data);
+    },
+    onSuccess: () => {
+      setEditingResearchId(null);
+      setEditResearchForm({ section: "", title: "", content: "" });
+      refetchResearch();
+    },
+  });
+
+  const togglePinResearch = useMutation({
+    mutationFn: async ({ researchId, pinned }: { researchId: number; pinned: boolean }) => {
+      await apiRequest("PATCH", `/api/research/${researchId}`, { pinned });
+    },
+    onSuccess: () => refetchResearch(),
+  });
+
+  const deleteResearch = useMutation({
+    mutationFn: async (researchId: number) => {
+      await apiRequest("DELETE", `/api/research/${researchId}`);
+    },
+    onSuccess: () => refetchResearch(),
+  });
+
   const availableMetricKeys = useMemo(() => {
     const keys = new Set<string>(["revenue"]);
     data?.companyMetrics.forEach((m) => keys.add(m.key));
     return Array.from(keys);
   }, [data?.companyMetrics]);
+
+  const researchBySection = (section: string) => {
+    return research.filter((r) => r.section === section && !r.pinned);
+  };
+
+  const pinnedResearch = useMemo(() => {
+    return research.filter((r) => r.pinned);
+  }, [research]);
+
+  const tasksByStatus = useMemo(() => {
+    const grouped = {
+      todo: tasks?.filter((t) => t.status === "todo") || [],
+      doing: tasks?.filter((t) => t.status === "doing") || [],
+      done: tasks?.filter((t) => t.status === "done") || [],
+    };
+    return grouped;
+  }, [tasks]);
 
   const metricForCompany = (companyId: number, key: string) => {
     if (key === "revenue") {
@@ -205,6 +288,194 @@ export default function IndustryDetailPage() {
               <Button onClick={() => saveIndustry.mutate()} disabled={saveIndustry.isPending}>
                 {saveIndustry.isPending ? "Saving..." : "Save research fields"}
               </Button>
+            </CardContent>
+          </Card>
+
+          {pinnedResearch.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Pinned research</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {pinnedResearch.map((item) => (
+                  <div key={item.id} className="p-3 rounded border">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        {item.content && <p className="text-xs text-muted-foreground line-clamp-3">{item.content}</p>}
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {item.section} • Updated {new Date(item.updatedAt || item.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => togglePinResearch.mutate({ researchId: item.id, pinned: false })}
+                        disabled={togglePinResearch.isPending}
+                        title="Unpin"
+                      >
+                        <Pin className="h-4 w-4 fill-current" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Research</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Select
+                  value={researchForm.section}
+                  onValueChange={(value) => setResearchForm((prev) => ({ ...prev, section: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RESEARCH_SECTIONS.map((section) => (
+                      <SelectItem key={section.key} value={section.key}>
+                        {section.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Title"
+                  value={researchForm.title}
+                  onChange={(e) => setResearchForm((prev) => ({ ...prev, title: e.target.value }))}
+                />
+                <Textarea
+                  placeholder="Content or notes"
+                  value={researchForm.content}
+                  onChange={(e) => setResearchForm((prev) => ({ ...prev, content: e.target.value }))}
+                  rows={4}
+                />
+                <Button
+                  onClick={() => createResearchItem.mutate()}
+                  disabled={!researchForm.title || createResearchItem.isPending}
+                >
+                  {createResearchItem.isPending ? "Adding..." : "Add research item"}
+                </Button>
+              </div>
+
+              {RESEARCH_SECTIONS.map((section) => (
+                <div key={section.key}>
+                  {researchBySection(section.key).length > 0 && (
+                    <div className="mt-4">
+                      <h3 className="text-sm font-semibold mb-2">{section.label}</h3>
+                      <div className="space-y-2">
+                        {researchBySection(section.key).map((item) => (
+                          <div key={item.id} className="border rounded-md p-3">
+                            {editingResearchId === item.id ? (
+                              <div className="space-y-2">
+                                <Input
+                                  placeholder="Title"
+                                  value={editResearchForm.title}
+                                  onChange={(e) => setEditResearchForm((prev) => ({ ...prev, title: e.target.value }))}
+                                />
+                                <Textarea
+                                  placeholder="Content or notes"
+                                  value={editResearchForm.content}
+                                  onChange={(e) => setEditResearchForm((prev) => ({ ...prev, content: e.target.value }))}
+                                  rows={4}
+                                />
+                                <Select
+                                  value={editResearchForm.section}
+                                  onValueChange={(value) => setEditResearchForm((prev) => ({ ...prev, section: value }))}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select section" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RESEARCH_SECTIONS.map((s) => (
+                                      <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => updateResearch.mutate({
+                                      researchId: item.id,
+                                      data: {
+                                        title: editResearchForm.title || undefined,
+                                        content: editResearchForm.content || undefined,
+                                        section: editResearchForm.section || undefined
+                                      }
+                                    })}
+                                    disabled={updateResearch.isPending}
+                                  >
+                                    {updateResearch.isPending ? "Saving..." : "Save"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingResearchId(null);
+                                      setEditResearchForm({ section: "", title: "", content: "" });
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1">
+                                  <p className="font-medium">{item.title}</p>
+                                  {item.content && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.content}</p>}
+                                  <p className="text-xs text-muted-foreground">
+                                    Added {new Date(item.createdAt).toLocaleString()}
+                                  </p>
+                                </div>
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingResearchId(item.id);
+                                      setEditResearchForm({
+                                        title: item.title,
+                                        content: item.content || "",
+                                        section: item.section
+                                      });
+                                    }}
+                                    title="Edit"
+                                  >
+                                    <Edit2 className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => togglePinResearch.mutate({ researchId: item.id, pinned: !item.pinned })}
+                                    disabled={togglePinResearch.isPending}
+                                    title={item.pinned ? "Unpin" : "Pin"}
+                                  >
+                                    <Pin className={`h-4 w-4 ${item.pinned ? 'fill-current' : ''}`} />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => deleteResearch.mutate(item.id)}
+                                    disabled={deleteResearch.isPending}
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </CardContent>
           </Card>
 
@@ -400,9 +671,12 @@ export default function IndustryDetailPage() {
                   {createTask.isPending ? "Saving..." : "Add task"}
                 </Button>
               </div>
-              <div className="space-y-2">
-                {tasks && tasks.length > 0 ? (
-                  tasks.map((task) => (
+
+              {/* To Do Tasks */}
+              {tasksByStatus.todo.length > 0 && (
+                <div className="space-y-2 mt-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground">To Do ({tasksByStatus.todo.length})</h3>
+                  {tasksByStatus.todo.map((task) => (
                     <div key={task.id} className="p-3 rounded border space-y-2">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div>
@@ -452,16 +726,144 @@ export default function IndustryDetailPage() {
                         />
                         <Input
                           placeholder="Assignee"
-                          value={task.assignedTo || ""}
-                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignedTo: e.target.value } })}
+                          value={task.assignee || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
                         />
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">No tasks yet.</p>
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
+
+              {/* In Progress Tasks */}
+              {tasksByStatus.doing.length > 0 && (
+                <div className="space-y-2 mt-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground">In Progress ({tasksByStatus.doing.length})</h3>
+                  {tasksByStatus.doing.map((task) => (
+                    <div key={task.id} className="p-3 rounded border space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="font-medium">{task.title}</p>
+                          {task.description && <p className="text-sm text-muted-foreground">{task.description}</p>}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteTask.mutate(task.id)}
+                          disabled={deleteTask.isPending}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-4">
+                        <Select
+                          value={task.status || "todo"}
+                          onValueChange={(val) => updateTask.mutate({ id: task.id, updates: { status: val } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todo">To do</SelectItem>
+                            <SelectItem value="doing">In progress</SelectItem>
+                            <SelectItem value="done">Done</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={task.priority || "medium"}
+                          onValueChange={(val) => updateTask.mutate({ id: task.id, updates: { priority: val } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="date"
+                          value={task.dueDate ? task.dueDate.toString().slice(0, 10) : ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { dueDate: e.target.value } })}
+                        />
+                        <Input
+                          placeholder="Assignee"
+                          value={task.assignee || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Done Tasks */}
+              {tasksByStatus.done.length > 0 && (
+                <div className="space-y-2 mt-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground">Done ({tasksByStatus.done.length})</h3>
+                  {tasksByStatus.done.map((task) => (
+                    <div key={task.id} className="p-3 rounded border space-y-2 opacity-60">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="font-medium">{task.title}</p>
+                          {task.description && <p className="text-sm text-muted-foreground">{task.description}</p>}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteTask.mutate(task.id)}
+                          disabled={deleteTask.isPending}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-4">
+                        <Select
+                          value={task.status || "todo"}
+                          onValueChange={(val) => updateTask.mutate({ id: task.id, updates: { status: val } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todo">To do</SelectItem>
+                            <SelectItem value="doing">In progress</SelectItem>
+                            <SelectItem value="done">Done</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={task.priority || "medium"}
+                          onValueChange={(val) => updateTask.mutate({ id: task.id, updates: { priority: val } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="date"
+                          value={task.dueDate ? task.dueDate.toString().slice(0, 10) : ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { dueDate: e.target.value } })}
+                        />
+                        <Input
+                          placeholder="Assignee"
+                          value={task.assignee || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {tasks && tasks.length === 0 && (
+                <p className="text-sm text-muted-foreground mt-4">No tasks yet.</p>
+              )}
             </CardContent>
           </Card>
         </div>
