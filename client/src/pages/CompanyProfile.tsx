@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
+import { Pin, Edit2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,8 @@ export default function CompanyProfilePage() {
   const [categoryInput, setCategoryInput] = useState<{ categoryId?: string; name?: string; type?: string }>({});
   const [metricForm, setMetricForm] = useState({ key: "", value: "", unit: "", period: "" });
   const [researchForm, setResearchForm] = useState({ section: "financials", title: "", content: "" });
+  const [editingResearchId, setEditingResearchId] = useState<number | null>(null);
+  const [editResearchForm, setEditResearchForm] = useState({ section: "", title: "", content: "" });
   const [sourceForm, setSourceForm] = useState<{ [key: number]: { sourceType: "document" | "url"; documentId?: string; pageNumber?: string; excerpt?: string; url?: string; snippetId?: string } }>({});
   const [pipelineStage, setPipelineStage] = useState<string>("");
   const [taskForm, setTaskForm] = useState({ title: "", description: "", status: "todo", priority: "medium", dueDate: "" });
@@ -272,6 +275,24 @@ export default function CompanyProfilePage() {
     onSuccess: () => refetch(),
   });
 
+  const togglePinResearch = useMutation({
+    mutationFn: async ({ researchId, pinned }: { researchId: number; pinned: boolean }) => {
+      await apiRequest("PATCH", `/api/research/${researchId}`, { pinned });
+    },
+    onSuccess: () => refetch(),
+  });
+
+  const updateResearch = useMutation({
+    mutationFn: async ({ researchId, data }: { researchId: number; data: { title?: string; content?: string; section?: string } }) => {
+      await apiRequest("PATCH", `/api/research/${researchId}`, data);
+    },
+    onSuccess: () => {
+      setEditingResearchId(null);
+      setEditResearchForm({ section: "", title: "", content: "" });
+      refetch();
+    },
+  });
+
   const documentOptions = useMemo(() => documents || [], [documents]);
 
   if (isLoading) {
@@ -447,11 +468,24 @@ export default function CompanyProfilePage() {
                 ) : (
                   pinnedResearch.map((item) => (
                     <div key={item.id} className="p-3 rounded border">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      {item.content && <p className="text-xs text-muted-foreground line-clamp-3">{item.content}</p>}
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        {item.section} • Updated {new Date(item.updatedAt || item.createdAt).toLocaleString()}
-                      </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{item.title}</p>
+                          {item.content && <p className="text-xs text-muted-foreground line-clamp-3">{item.content}</p>}
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            {item.section} • Updated {new Date(item.updatedAt || item.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => togglePinResearch.mutate({ researchId: item.id, pinned: false })}
+                          disabled={togglePinResearch.isPending}
+                          title="Unpin"
+                        >
+                          <Pin className="h-4 w-4 fill-current" />
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -601,23 +635,109 @@ export default function CompanyProfilePage() {
                 ) : (
                   researchBySection(section.key).map((item) => (
                     <div key={item.id} className="border rounded-md p-3 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-medium">{item.title}</p>
-                          {item.content && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.content}</p>}
-                          <p className="text-xs text-muted-foreground">
-                            Added {new Date(item.createdAt).toLocaleString()}
-                          </p>
+                      {editingResearchId === item.id ? (
+                        <div className="space-y-2">
+                          <div className="space-y-2">
+                            <Input
+                              placeholder="Title"
+                              value={editResearchForm.title}
+                              onChange={(e) => setEditResearchForm((prev) => ({ ...prev, title: e.target.value }))}
+                            />
+                            <Textarea
+                              placeholder="Content or notes"
+                              value={editResearchForm.content}
+                              onChange={(e) => setEditResearchForm((prev) => ({ ...prev, content: e.target.value }))}
+                              rows={4}
+                            />
+                            <Select
+                              value={editResearchForm.section}
+                              onValueChange={(value) => setEditResearchForm((prev) => ({ ...prev, section: value }))}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select section" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {sections.map((s) => (
+                                  <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => updateResearch.mutate({
+                                researchId: item.id,
+                                data: {
+                                  title: editResearchForm.title || undefined,
+                                  content: editResearchForm.content || undefined,
+                                  section: editResearchForm.section || undefined
+                                }
+                              })}
+                              disabled={updateResearch.isPending}
+                            >
+                              {updateResearch.isPending ? "Saving..." : "Save"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingResearchId(null);
+                                setEditResearchForm({ section: "", title: "", content: "" });
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteResearch.mutate(item.id)}
-                          disabled={deleteResearch.isPending}
-                        >
-                          Remove
-                        </Button>
-                      </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{item.title}</p>
+                              {item.pinned && <Pin className="h-4 w-4 text-primary" fill="currentColor" />}
+                            </div>
+                            {item.content && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.content}</p>}
+                            <p className="text-xs text-muted-foreground">
+                              Added {new Date(item.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditingResearchId(item.id);
+                                setEditResearchForm({
+                                  title: item.title,
+                                  content: item.content || "",
+                                  section: item.section
+                                });
+                              }}
+                              title="Edit"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => togglePinResearch.mutate({ researchId: item.id, pinned: !item.pinned })}
+                              disabled={togglePinResearch.isPending}
+                              title={item.pinned ? "Unpin" : "Pin"}
+                            >
+                              <Pin className={`h-4 w-4 ${item.pinned ? 'fill-current' : ''}`} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteResearch.mutate(item.id)}
+                              disabled={deleteResearch.isPending}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <p className="text-xs font-semibold text-muted-foreground">Sources</p>
                         {item.sources?.length ? (
