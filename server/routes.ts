@@ -1132,11 +1132,17 @@ Return only the classification type as a single word.`
       documentType,
     });
 
+    // Clean up file buffer from cache to prevent memory leak
+    fileBufferCache.delete(documentId);
+
   } catch (error) {
     console.error("Document processing error:", error);
     await storage.updateDocument(documentId, {
       processingStatus: "failed",
       errorMessage: error instanceof Error ? error.message : "Unknown error",
     });
+
+    // Clean up file buffer from cache even on error
+    fileBufferCache.delete(documentId);
   }
 }
