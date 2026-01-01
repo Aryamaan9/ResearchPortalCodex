@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { Upload, FileText, Search, LayoutDashboard, Building2, Building } from "lucide-react";
+import { Upload, FileText, Search, LayoutDashboard, Building2, Building, Rocket } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -28,6 +28,11 @@ const menuItems = [
     title: "Documents",
     url: "/documents",
     icon: FileText,
+  },
+  {
+    title: "Research",
+    url: "/research",
+    icon: Rocket,
   },
   {
     title: "Industries",
