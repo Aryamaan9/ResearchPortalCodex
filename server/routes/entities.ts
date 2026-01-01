@@ -358,7 +358,7 @@ export function registerEntityRoutes(app: Express) {
 
       if (hasLatestConcall === "true") {
         conditions.push(
-          sql`EXISTS (SELECT 1 FROM ${companyDocuments} cd INNER JOIN ${documents} d ON cd.document_id = d.id WHERE cd.company_id = ${companies.id} AND d.doc_type = 'concall_transcript')`
+          sql`EXISTS (SELECT 1 FROM ${companyDocuments} cd INNER JOIN ${documents} d ON cd.document_id = d.id WHERE cd.company_id = ${companies.id} AND d.document_type = 'concall_transcript')`
         );
       }
 
@@ -378,6 +378,7 @@ export function registerEntityRoutes(app: Express) {
           industryId: companies.industryId,
           industryName: industries.name,
           pipelineStage: companies.pipelineStage,
+          revenue: companies.revenue,
         })
         .from(companies)
         .leftJoin(industries, eq(companies.industryId, industries.id));

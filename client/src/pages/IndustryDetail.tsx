@@ -293,17 +293,21 @@ export default function IndustryDetailPage() {
                     <SelectValue placeholder="Select a document" />
                   </SelectTrigger>
                   <SelectContent>
-                    {documents && documents.length > 0 ? (
-                      documents.map((doc) => (
-                        <SelectItem key={doc.id} value={doc.id.toString()}>
-                          {doc.title}
+                    {(() => {
+                      const linkedDocIds = new Set(data.documents.map(d => d.id));
+                      const availableDocs = documents?.filter(doc => !linkedDocIds.has(doc.id)) || [];
+                      return availableDocs.length > 0 ? (
+                        availableDocs.map((doc) => (
+                          <SelectItem key={doc.id} value={doc.id.toString()}>
+                            {doc.title}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="none" disabled>
+                          No documents available
                         </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="none" disabled>
-                        No documents available
-                      </SelectItem>
-                    )}
+                      );
+                    })()}
                   </SelectContent>
                 </Select>
                 <Button
