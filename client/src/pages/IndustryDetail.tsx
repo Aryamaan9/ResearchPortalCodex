@@ -245,7 +245,7 @@ export default function IndustryDetailPage() {
   }, [tasks]);
 
   const sortedAndPaginatedCompanies = useMemo(() => {
-    if (!data?.companies) return { companies: [], totalPages: 0 };
+    if (!data?.companies) return { companies: [], totalPages: 0, totalCompanies: 0 };
 
     const sorted = [...data.companies].sort((a, b) => {
       let aVal: any, bVal: any;
@@ -879,8 +879,8 @@ export default function IndustryDetailPage() {
                         />
                         <Input
                           placeholder="Assignee"
-                          value={task.assignee || ""}
-                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
+                          value={task.assignedTo || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignedTo: e.target.value } })}
                         />
                       </div>
                     </div>
@@ -942,8 +942,8 @@ export default function IndustryDetailPage() {
                         />
                         <Input
                           placeholder="Assignee"
-                          value={task.assignee || ""}
-                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
+                          value={task.assignedTo || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignedTo: e.target.value } })}
                         />
                       </div>
                     </div>
@@ -1005,8 +1005,8 @@ export default function IndustryDetailPage() {
                         />
                         <Input
                           placeholder="Assignee"
-                          value={task.assignee || ""}
-                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignee: e.target.value } })}
+                          value={task.assignedTo || ""}
+                          onChange={(e) => updateTask.mutate({ id: task.id, updates: { assignedTo: e.target.value } })}
                         />
                       </div>
                     </div>

@@ -18,6 +18,7 @@ import IndustryDetailPage from "@/pages/IndustryDetail";
 import CompaniesPage from "@/pages/Companies";
 import CompanyProfilePage from "@/pages/CompanyProfile";
 import NotFound from "@/pages/not-found";
+import ResearchPlatformPage from "@/pages/ResearchPlatform";
 
 function Router() {
   return (
@@ -26,6 +27,8 @@ function Router() {
       <Route path="/upload" component={Upload} />
       <Route path="/documents" component={Documents} />
       <Route path="/documents/:id" component={DocumentViewer} />
+      <Route path="/research/:rest*" component={ResearchPlatformPage} />
+      <Route path="/research" component={ResearchPlatformPage} />
       <Route path="/industries/:id" component={IndustryDetailPage} />
       <Route path="/industries" component={IndustriesPage} />
       <Route path="/companies/:id" component={CompanyProfilePage} />
