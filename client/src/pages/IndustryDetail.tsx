@@ -45,6 +45,10 @@ export default function IndustryDetailPage() {
   const [researchForm, setResearchForm] = useState({ section: "market_overview", title: "", content: "" });
   const [editingResearchId, setEditingResearchId] = useState<number | null>(null);
   const [editResearchForm, setEditResearchForm] = useState({ section: "", title: "", content: "" });
+  const [companySortBy, setCompanySortBy] = useState<"name" | "ticker" | "revenue">("name");
+  const [companySortOrder, setCompanySortOrder] = useState<"asc" | "desc">("asc");
+  const [companyPage, setCompanyPage] = useState(1);
+  const companiesPerPage = 10;
 
   const { data, isLoading, error, refetch } = useQuery<IndustryWithCompanies>({
     queryKey: ["/api/industries", params.id],
@@ -74,6 +78,15 @@ export default function IndustryDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/research?entityType=industry&entityId=${params.id}`);
       if (!res.ok) throw new Error("Failed to load research");
+      return res.json();
+    },
+  });
+
+  const { data: activityItems = [] } = useQuery<{ type: string; id: number; title: string; section: string | null; createdAt: string }[]>({
+    queryKey: ["/api/industries", params.id, "activity"],
+    queryFn: async () => {
+      const res = await fetch(`/api/industries/${params.id}/activity`);
+      if (!res.ok) throw new Error("Failed to load activity");
       return res.json();
     },
   });
@@ -198,6 +211,16 @@ export default function IndustryDetailPage() {
     onSuccess: () => refetchResearch(),
   });
 
+  const deleteIndustry = useMutation({
+    mutationFn: async () => {
+      if (!params.id) return;
+      await apiRequest("DELETE", `/api/industries/${params.id}`);
+    },
+    onSuccess: () => {
+      window.location.href = "/industries";
+    },
+  });
+
   const availableMetricKeys = useMemo(() => {
     const keys = new Set<string>(["revenue"]);
     data?.companyMetrics.forEach((m) => keys.add(m.key));
@@ -221,6 +244,35 @@ export default function IndustryDetailPage() {
     return grouped;
   }, [tasks]);
 
+  const sortedAndPaginatedCompanies = useMemo(() => {
+    if (!data?.companies) return { companies: [], totalPages: 0 };
+
+    const sorted = [...data.companies].sort((a, b) => {
+      let aVal: any, bVal: any;
+
+      if (companySortBy === "name") {
+        aVal = a.name?.toLowerCase() || "";
+        bVal = b.name?.toLowerCase() || "";
+      } else if (companySortBy === "ticker") {
+        aVal = a.ticker?.toLowerCase() || "";
+        bVal = b.ticker?.toLowerCase() || "";
+      } else if (companySortBy === "revenue") {
+        aVal = a.revenue || 0;
+        bVal = b.revenue || 0;
+      }
+
+      if (aVal < bVal) return companySortOrder === "asc" ? -1 : 1;
+      if (aVal > bVal) return companySortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    const totalPages = Math.ceil(sorted.length / companiesPerPage);
+    const startIndex = (companyPage - 1) * companiesPerPage;
+    const paginatedCompanies = sorted.slice(startIndex, startIndex + companiesPerPage);
+
+    return { companies: paginatedCompanies, totalPages, totalCompanies: sorted.length };
+  }, [data?.companies, companySortBy, companySortOrder, companyPage, companiesPerPage]);
+
   const metricForCompany = (companyId: number, key: string) => {
     if (key === "revenue") {
       const company = data?.companies.find((c) => c.id === companyId);
@@ -240,11 +292,25 @@ export default function IndustryDetailPage() {
           <h1 className="text-2xl font-semibold">Industry workspace</h1>
           <p className="text-sm text-muted-foreground">Research fields, linked companies, and documents</p>
         </div>
-        {params.id && (
-          <Link href={`/companies?industryId=${params.id}`}>
-            <span className="text-sm text-primary hover:underline">Create company in this industry</span>
-          </Link>
-        )}
+        <div className="flex gap-2">
+          {params.id && (
+            <Link href={`/companies?industryId=${params.id}`}>
+              <span className="text-sm text-primary hover:underline">Create company in this industry</span>
+            </Link>
+          )}
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              if (window.confirm("Are you sure you want to delete this industry? This action cannot be undone.")) {
+                deleteIndustry.mutate();
+              }
+            }}
+            disabled={deleteIndustry.isPending}
+          >
+            {deleteIndustry.isPending ? "Deleting..." : "Delete Industry"}
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -322,6 +388,30 @@ export default function IndustryDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Latest activity</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {activityItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No activity yet.</p>
+              ) : (
+                activityItems.map((event) => (
+                  <div key={`${event.type}-${event.id}`} className="p-3 rounded border">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">{event.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {event.type.toUpperCase()} {event.section && `• ${event.section}`} • {new Date(event.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -484,41 +574,64 @@ export default function IndustryDetailPage() {
               <CardTitle>Companies</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-3 items-center">
-                <p className="text-sm font-medium">Metrics shown:</p>
-                {availableMetricKeys.map((key) => (
-                  <label key={key} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={selectedMetrics.includes(key)}
-                      onCheckedChange={(checked) => {
-                        setSelectedMetrics((prev) =>
-                          checked ? [...prev, key] : prev.filter((k) => k !== key)
-                        );
-                      }}
-                    />
-                    <span className="capitalize">{key.replace(/_/g, " ")}</span>
-                  </label>
-                ))}
+              <div className="flex flex-wrap gap-3 items-center justify-between">
+                <div className="flex flex-wrap gap-3 items-center">
+                  <p className="text-sm font-medium">Metrics shown:</p>
+                  {availableMetricKeys.map((key) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={selectedMetrics.includes(key)}
+                        onCheckedChange={(checked) => {
+                          setSelectedMetrics((prev) =>
+                            checked ? [...prev, key] : prev.filter((k) => k !== key)
+                          );
+                        }}
+                      />
+                      <span className="capitalize">{key.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 items-center">
+                  <p className="text-sm font-medium">Sort by:</p>
+                  <Select value={companySortBy} onValueChange={(val) => setCompanySortBy(val as "name" | "ticker" | "revenue")}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="ticker">Ticker</SelectItem>
+                      <SelectItem value="revenue">Revenue</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCompanySortOrder(companySortOrder === "asc" ? "desc" : "asc")}
+                  >
+                    {companySortOrder === "asc" ? "↑" : "↓"}
+                  </Button>
+                </div>
               </div>
 
               {data.companies.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No companies yet.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left">
-                        <th className="py-2">Name</th>
-                        <th className="py-2">Ticker</th>
-                        {selectedMetrics.map((key) => (
-                          <th key={key} className="py-2 capitalize">
-                            {key.replace(/_/g, " ")}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {data.companies.map((company) => (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left">
+                          <th className="py-2">Name</th>
+                          <th className="py-2">Ticker</th>
+                          {selectedMetrics.map((key) => (
+                            <th key={key} className="py-2 capitalize">
+                              {key.replace(/_/g, " ")}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {sortedAndPaginatedCompanies.companies.map((company) => (
                         <tr key={company.id} className="hover:bg-muted/30">
                           <td className="py-2">
                             <Link href={`/companies/${company.id}`}>
@@ -549,7 +662,47 @@ export default function IndustryDetailPage() {
                     </tbody>
                   </table>
                 </div>
-              )}
+
+                {sortedAndPaginatedCompanies.totalPages > 1 && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {((companyPage - 1) * companiesPerPage) + 1} - {Math.min(companyPage * companiesPerPage, sortedAndPaginatedCompanies.totalCompanies)} of {sortedAndPaginatedCompanies.totalCompanies} companies
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCompanyPage((p) => Math.max(1, p - 1))}
+                        disabled={companyPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: sortedAndPaginatedCompanies.totalPages }, (_, i) => i + 1).map((page) => (
+                          <Button
+                            key={page}
+                            variant={page === companyPage ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setCompanyPage(page)}
+                            className="w-8 h-8 p-0"
+                          >
+                            {page}
+                          </Button>
+                        ))}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCompanyPage((p) => Math.min(sortedAndPaginatedCompanies.totalPages, p + 1))}
+                        disabled={companyPage === sortedAndPaginatedCompanies.totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             </CardContent>
           </Card>
 

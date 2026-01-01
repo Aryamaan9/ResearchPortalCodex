@@ -1410,4 +1410,90 @@ export function registerEntityRoutes(app: Express) {
       res.status(500).json({ error: "Failed to build snapshot" });
     }
   });
+
+  app.get("/api/industries/:id/activity", async (req: Request, res: Response) => {
+    try {
+      const industryId = Number(req.params.id);
+      if (Number.isNaN(industryId)) {
+        return res.status(400).json({ error: "Invalid industry id" });
+      }
+
+      const researchEvents = await db
+        .select({
+          type: sql`'research'`,
+          id: researchItems.id,
+          title: researchItems.title,
+          section: researchItems.section,
+          createdAt: researchItems.updatedAt,
+        })
+        .from(researchItems)
+        .where(and(eq(researchItems.entityType, "industry"), eq(researchItems.entityId, industryId)));
+
+      const documentEvents = await db
+        .select({
+          type: sql`'document'`,
+          id: documents.id,
+          title: documents.title,
+          section: documents.docType,
+          createdAt: industryDocuments.createdAt,
+        })
+        .from(industryDocuments)
+        .innerJoin(documents, eq(industryDocuments.documentId, documents.id))
+        .where(eq(industryDocuments.industryId, industryId));
+
+      const taskEvents = await db
+        .select({
+          type: sql`'task'`,
+          id: tasks.id,
+          title: tasks.title,
+          section: tasks.status,
+          createdAt: tasks.updatedAt,
+        })
+        .from(tasks)
+        .where(and(eq(tasks.entityType, "industry"), eq(tasks.entityId, industryId)));
+
+      const combined = [...researchEvents, ...documentEvents, ...taskEvents]
+        .sort((a, b) => new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime())
+        .slice(0, 20);
+
+      res.json(combined);
+    } catch (error) {
+      console.error("Error fetching activity:", error);
+      res.status(500).json({ error: "Failed to fetch activity" });
+    }
+  });
+
+  app.delete("/api/industries/:id", async (req: Request, res: Response) => {
+    try {
+      const industryId = Number(req.params.id);
+      if (Number.isNaN(industryId)) {
+        return res.status(400).json({ error: "Invalid industry id" });
+      }
+
+      // Check if there are companies linked to this industry
+      const linkedCompanies = await db
+        .select({ id: companies.id })
+        .from(companies)
+        .where(eq(companies.industryId, industryId));
+
+      if (linkedCompanies.length > 0) {
+        return res.status(400).json({
+          error: `Cannot delete industry with ${linkedCompanies.length} linked companies. Please reassign or delete companies first.`
+        });
+      }
+
+      // Delete related records first
+      await db.delete(industryDocuments).where(eq(industryDocuments.industryId, industryId));
+      await db.delete(researchItems).where(and(eq(researchItems.entityType, "industry"), eq(researchItems.entityId, industryId)));
+      await db.delete(tasks).where(and(eq(tasks.entityType, "industry"), eq(tasks.entityId, industryId)));
+
+      // Delete the industry
+      await db.delete(industries).where(eq(industries.id, industryId));
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting industry:", error);
+      res.status(500).json({ error: "Failed to delete industry" });
+    }
+  });
 }
